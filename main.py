@@ -3,7 +3,6 @@ import stat
 import subprocess
 import tarfile
 import uuid
-import linux
 import sys
 import click
 import traceback
@@ -114,7 +113,7 @@ def _create_mount(new_root):
 
 def contain(command, image_name, image_dir, container_id, container_dir):
     try:
-        subprocess.run(["hostname", container_id])
+        tools.sethostname(container_id)
         subprocess.run(["mount", "--make-rprivate", "/"], check=True)
     except subprocess.CalledProcessError as e:
         print(f"Failed to make root private: {e}", file=sys.stderr)
@@ -129,6 +128,9 @@ def contain(command, image_name, image_dir, container_id, container_dir):
     tools.pivot_root(new_root, old_root)
 
     os.chdir("/")
+
+    tools.umount("/old_root", 2)
+    os.rmdir("/old_root")
 
     os.execvp(command[0], command)
 
@@ -147,18 +149,19 @@ def contain(command, image_name, image_dir, container_id, container_dir):
     help="Containers directory",
     default=os.path.join(dir, "containers/"),
 )
-@click.argument("Command", required=True, nargs=-1)
+@click.argument("command", required=True, nargs=-1)
 def run(image_name, image_dir, container_dir, command):
     container_id = str(uuid.uuid4())
 
     flags = CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWUTS
-    callback_args = (command, image_name, image_dir, container_id, container_dir)
-
-    wrapped = lambda: contain(
-        command, image_name, image_dir, container_id, container_dir
-    )
-
-    pid = libc_clone(wrapped)
+    tools.unshare(flags)
+    pid = os.fork()
+    # pid = tools.clone(
+    #    contain(command, image_name, image_dir, container_id, container_dir), flags
+    # )
+    #
+    if pid == 0:
+        contain(command, image_name, image_dir, container_id, container_dir)
 
     _, status = os.waitpid(pid, 0)
     exit_code = os.WEXITSTATUS(status)

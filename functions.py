@@ -23,60 +23,22 @@ class FuncTools:
                 f"Successfully changed root to {new_root} and moved old root to {put_old}."
             )
 
-    def clone(self, callback, flags=None, callback_arg=None) -> int:
-        """
-        Wrapper for the clone syscall.
+    def clone(self, callback, flags):
+        stack_size = 8096
+        stack = ctypes.create_string_buffer(stack_size)
+        stack_top = ctypes.c_void_p(ctypes.addressof(stack) + stack_size)
 
-        Args:
-            callback: Function to be executed in the new process/thread
-            flags: Clone flags (default: SIGCHLD)
-            callback_arg: Optional argument to pass to the callback
+        f_c = ctypes.CFUNCTYPE(ctypes.c_int)(callback)
 
-        Returns:
-            pid: Process ID of the new process/thread
+        SYS_clone = 56
+        child_tid = libc.syscall(SYS_clone, f_c, stack_top, flags, None)
 
-        Raises:
-            OSError: If clone fails
-        """
-        # Default to SIGCHLD if no flags specified for proper process management
-        if flags is None:
-            flags = 0x20000000  # SIGCHLD
+        return child_tid
 
-        # Create callback function type
-        c_callback = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)(callback)
-
-        # Allocate stack using mmap for better memory management
-        STACK_SIZE = 8192  # 8KB stack
-
-        # Using mmap to allocate stack memory
-        stack = mmap.mmap(
-            -1,
-            STACK_SIZE,
-            prot=mmap.PROT_READ | mmap.PROT_WRITE,
-            flags=mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS,
-        )
-
-        # Stack grows downward, so point to the high address
-        stack_top = ctypes.c_void_p(
-            ctypes.addressof(ctypes.c_char.from_buffer(stack, 0)) + STACK_SIZE
-        )
-
-        # Prepare argument if provided
-        if callback_arg is not None:
-            c_arg = ctypes.c_void_p(callback_arg)
-        else:
-            c_arg = None
-
-        try:
-            # Call clone
-            result = libc.clone(c_callback, stack_top, flags, c_arg)
-            if result == -1:
-                raise OSError(ctypes.get_errno(), "Clone failed")
-            return result
-        except:
-            # Ensure stack is freed on error
-            stack.close()
-            raise
+    def sethostname(self, new_name):
+        result = libc.sethostname(new_name.encode("utf-8"), len(new_name))
+        if result != 0:
+            raise OSError("Failed to set hostname")
 
     def unshare(self, flags):
         if libc.unshare(flags) != 0:
@@ -84,24 +46,11 @@ class FuncTools:
             raise OSError(errno, f"Failed to unshare: {os.strerror(errno)}")
 
     def umount(self, target, flags):
-        cmd = ["umount"]
-        cmd.append("-l")
-        if target:
-            cmd.append(target)
-        if flags:
-            cmd.append(flags)
-
-        try:
-            subprocess.run(
-                cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-            )
-            print(f"Successfully unmounted {target}.")
-        except subprocess.CalledProcessError as e:
-            print(
-                f"Failed to unmount {target}: {e.stderr.decode().strip()}",
-                file=sys.stderr,
-            )
-            raise
+        ret = libc.umount2(target.encode(), flags)
+        print(f"Successfully Unmounted {target}")
+        if ret != 0:
+            errno = ctypes.get_errno()
+            raise OSError(errno, os.strerror(errno))
 
     def mount(self, source, target, fs_type, options=None):
         cmd = ["mount"]
