@@ -12,6 +12,7 @@ tools = FuncTools()
 
 CLONE_NEWNS = 0x00020000
 CLONE_NEWPID = 0x20000000
+CLONE_NEWNET = 0x40000000
 CLONE_NEWUTS = 0x04000000
 
 dir = os.getcwd()
@@ -153,7 +154,7 @@ def contain(command, image_name, image_dir, container_id, container_dir):
 def run(image_name, image_dir, container_dir, command):
     container_id = str(uuid.uuid4())
 
-    flags = CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWUTS
+    flags = CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWNET
     tools.unshare(flags)
     pid = os.fork()
     # pid = tools.clone(
@@ -162,6 +163,8 @@ def run(image_name, image_dir, container_dir, command):
     #
     if pid == 0:
         contain(command, image_name, image_dir, container_id, container_dir)
+        os.system("ip link set lo up")
+        os._exit(0)
 
     _, status = os.waitpid(pid, 0)
     exit_code = os.WEXITSTATUS(status)
