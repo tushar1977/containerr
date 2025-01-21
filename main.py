@@ -50,6 +50,48 @@ def _get_container_path(container_id, container_dir, *subdir_names):
     return os.path.join(container_dir, container_id, *subdir_names)
 
 
+def _setup_cpu_cgroup(container_id, cpu_shares):
+    CGROUP_BASE = "/sys/fs/cgroup"
+    RUBBER_DOCKER = os.path.join(CGROUP_BASE, "rubber_docker")
+
+    if not os.path.exists(RUBBER_DOCKER):
+        os.makedirs(RUBBER_DOCKER)
+        with open(os.path.join(RUBBER_DOCKER, "cgroup.subtree_control"), "w") as f:
+            f.write("+cpu")
+
+    container_cgroup = os.path.join(RUBBER_DOCKER, container_id)
+    os.makedirs(container_cgroup, exist_ok=True)
+
+    with open(os.path.join(container_cgroup, "cgroup.procs"), "w") as f:
+        f.write(str(os.getpid()))
+
+    if cpu_shares:
+        weight = max(1, min(10000, int(cpu_shares * 10000 / 1024)))
+        with open(os.path.join(container_cgroup, "cpu.weight"), "w") as f:
+            f.write(str(weight))
+
+
+def _setup_memory_cgroup(container_id, memory, memory_swap):
+    CGROUP_BASE = "/sys/fs/cgroup"
+    container_mem_cgroup_dir = os.path.join(CGROUP_BASE, "rubber_docker", container_id)
+    if not os.path.exists(container_mem_cgroup_dir):
+        rubber_docker_dir = os.path.join(CGROUP_BASE, "rubber_docker")
+        os.makedirs(container_mem_cgroup_dir, mode=0o755)
+        with open(os.path.join(rubber_docker_dir, "cgroup.subtree_control"), "w") as f:
+            f.write("+memory")
+
+    tasks_file = os.path.join(container_mem_cgroup_dir, "cgroup.procs")
+    open(tasks_file, "w").write(str(os.getpid()))
+
+    if memory:
+        mem_limit_file = os.path.join(container_mem_cgroup_dir, "memory.max")
+        open(mem_limit_file, "w").write(str(memory))
+
+    if memory_swap:
+        memsw_limit_file = os.path.join(container_mem_cgroup_dir, "memory.swap.max")
+        open(memsw_limit_file, "w").write(str(memory_swap))
+
+
 def create_container_root(image_name, image_dir, container_id, container_dir):
     image_path = _get_image_path(image_name, image_dir)
     image_root = os.path.join(image_dir, image_name, "rootfs")
@@ -112,8 +154,19 @@ def _create_mount(new_root):
         raise
 
 
-def contain(command, image_name, image_dir, container_id, container_dir):
+def contain(
+    command,
+    image_name,
+    image_dir,
+    container_id,
+    container_dir,
+    cpu_shares,
+    memory,
+    memory_swap,
+):
     try:
+        _setup_cpu_cgroup(container_id, cpu_shares)
+        _setup_memory_cgroup(container_id, memory, memory_swap)
         tools.sethostname(container_id)
         subprocess.run(["mount", "--make-rprivate", "/"], check=True)
     except subprocess.CalledProcessError as e:
@@ -122,6 +175,7 @@ def contain(command, image_name, image_dir, container_id, container_dir):
 
     new_root = create_container_root(image_name, image_dir, container_id, container_dir)
     print("Created a new root fs for our container: {}".format(new_root))
+
     _create_mount(new_root)
     old_root = os.path.join(new_root, "old_root")
     os.makedirs(old_root)
@@ -141,6 +195,19 @@ def contain(command, image_name, image_dir, container_id, container_dir):
         ignore_unknown_options=True,
     )
 )
+@click.option(
+    "--memory",
+    "-m",
+    help="Memory limit in bytes." " Use suffixes to represent larger units (k, m, g)",
+    default=None,
+)
+@click.option(
+    "--memory-swap",
+    help="A positive integer equal to memory plus swap."
+    " Specify -1 to enable unlimited swap.",
+    default=None,
+)
+@click.option("--cpu-share", "-c", help="CPU shares (relative weight)", default=0)
 @click.option("--image-name", "-i", help="Image name", default="ubuntu")
 @click.option(
     "--image-dir", help="Images directory", default=os.path.join(dir, "images/")
@@ -151,19 +218,23 @@ def contain(command, image_name, image_dir, container_id, container_dir):
     default=os.path.join(dir, "containers/"),
 )
 @click.argument("command", required=True, nargs=-1)
-def run(image_name, image_dir, container_dir, command):
+def run(memory, memory_swap, cpu_share, image_name, image_dir, container_dir, command):
     container_id = str(uuid.uuid4())
 
     flags = CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWNET
     tools.unshare(flags)
     pid = os.fork()
-    # pid = tools.clone(
-    #    contain(command, image_name, image_dir, container_id, container_dir), flags
-    # )
-    #
     if pid == 0:
-        contain(command, image_name, image_dir, container_id, container_dir)
-        os.system("ip link set lo up")
+        contain(
+            command,
+            image_name,
+            image_dir,
+            container_id,
+            container_dir,
+            cpu_share,
+            memory,
+            memory_swap,
+        )
         os._exit(0)
 
     _, status = os.waitpid(pid, 0)

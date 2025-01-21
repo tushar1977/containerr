@@ -1,17 +1,35 @@
 #!/usr/bin/env bash
 #
-# The dirtiest cleanup script
+# Cleanup script for rubber docker workshop
 #
-
-# don't interfere with umount
+# Move to root directory to avoid path issues
 pushd /
 
-# umount stuff
-while $(grep -q workshop /proc/mounts); do
-  sudo umount $(grep workshop /proc/mounts | shuf | head -n1 | cut -f2 -d' ') 2>/dev/null
+# First cleanup all processes in the cgroups
+if [ -d "/sys/fs/cgroup/rubber_docker" ]; then
+  for cgroup in /sys/fs/cgroup/rubber_docker/*; do
+    if [ -d "$cgroup" ]; then
+      # Move all processes to parent cgroup
+      if [ -f "$cgroup/cgroup.procs" ]; then
+        cat "$cgroup/cgroup.procs" 2>/dev/null | while read pid; do
+          echo "$pid" >/sys/fs/cgroup/cgroup.procs 2>/dev/null
+        done
+      fi
+      # Remove the cgroup directory
+      rmdir "$cgroup" 2>/dev/null
+    fi
+  done
+  # Remove the main rubber_docker cgroup
+  rmdir /sys/fs/cgroup/rubber_docker 2>/dev/null
+fi
+
+# Unmount any remaining mounts
+while grep -q workshop /proc/mounts; do
+  mnt=$(grep workshop /proc/mounts | shuf | head -n1 | cut -f2 -d' ')
+  sudo umount "$mnt" 2>/dev/null || sudo umount -l "$mnt" 2>/dev/null
 done
 
-# remove stuff
-sudo rm -rf /workshop/containers/*
+# Remove container directories
+sudo rm -rf ./containers/*
 
-popd
+popd || exit
