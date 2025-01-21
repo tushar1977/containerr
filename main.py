@@ -13,6 +13,7 @@ tools = FuncTools()
 CLONE_NEWNS = 0x00020000
 CLONE_NEWPID = 0x20000000
 CLONE_NEWNET = 0x40000000
+CLONE_NEWCGROUP = 0x02000000
 CLONE_NEWUTS = 0x04000000
 
 dir = os.getcwd()
@@ -54,15 +55,17 @@ def _setup_cpu_cgroup(container_id, cpu_shares):
     CGROUP_BASE = "/sys/fs/cgroup"
     RUBBER_DOCKER = os.path.join(CGROUP_BASE, "rubber_docker")
 
+    container_cgroup = os.path.join(RUBBER_DOCKER, container_id)
+    proc_file = os.path.join(container_cgroup, "cgroup.procs")
     if not os.path.exists(RUBBER_DOCKER):
         os.makedirs(RUBBER_DOCKER)
-        with open(os.path.join(RUBBER_DOCKER, "cgroup.subtree_control"), "w") as f:
-            f.write("+cpu")
+    with open(os.path.join(RUBBER_DOCKER, "cgroup.subtree_control"), "w") as f:
+        f.write("+cpu")
 
-    container_cgroup = os.path.join(RUBBER_DOCKER, container_id)
     os.makedirs(container_cgroup, exist_ok=True)
-
-    with open(os.path.join(container_cgroup, "cgroup.procs"), "w") as f:
+    open(proc_file, "w").close()
+    print(proc_file)
+    with open(proc_file, "w") as f:
         f.write(str(os.getpid()))
 
     if cpu_shares:
@@ -74,22 +77,30 @@ def _setup_cpu_cgroup(container_id, cpu_shares):
 def _setup_memory_cgroup(container_id, memory, memory_swap):
     CGROUP_BASE = "/sys/fs/cgroup"
     container_mem_cgroup_dir = os.path.join(CGROUP_BASE, "rubber_docker", container_id)
-    if not os.path.exists(container_mem_cgroup_dir):
-        rubber_docker_dir = os.path.join(CGROUP_BASE, "rubber_docker")
-        os.makedirs(container_mem_cgroup_dir, mode=0o755)
-        with open(os.path.join(rubber_docker_dir, "cgroup.subtree_control"), "w") as f:
-            f.write("+memory")
-
+    rubber_docker_dir = os.path.join(CGROUP_BASE, "rubber_docker")
     tasks_file = os.path.join(container_mem_cgroup_dir, "cgroup.procs")
-    open(tasks_file, "w").write(str(os.getpid()))
+    mem_limit_file = os.path.join(container_mem_cgroup_dir, "memory.max")
+
+    if not os.path.exists(container_mem_cgroup_dir):
+        os.makedirs(container_mem_cgroup_dir)
+
+    with open(os.path.join(rubber_docker_dir, "cgroup.subtree_control"), "w") as f:
+        f.write("+memory")
+
+    with open(tasks_file, "w") as f:
+        f.write(str(os.getpid()))
+
+    if not os.path.exists(mem_limit_file):
+        open(mem_limit_file, "w").close()
 
     if memory:
-        mem_limit_file = os.path.join(container_mem_cgroup_dir, "memory.max")
-        open(mem_limit_file, "w").write(str(memory))
+        with open(mem_limit_file, "w") as f:
+            f.write(str(memory))
 
     if memory_swap:
         memsw_limit_file = os.path.join(container_mem_cgroup_dir, "memory.swap.max")
-        open(memsw_limit_file, "w").write(str(memory_swap))
+        with open(memsw_limit_file, "w") as f:
+            f.write(str(memory_swap))
 
 
 def create_container_root(image_name, image_dir, container_id, container_dir):
@@ -221,7 +232,7 @@ def contain(
 def run(memory, memory_swap, cpu_share, image_name, image_dir, container_dir, command):
     container_id = str(uuid.uuid4())
 
-    flags = CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWNET
+    flags = CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWNET | CLONE_NEWCGROUP
     tools.unshare(flags)
     pid = os.fork()
     if pid == 0:
