@@ -5,16 +5,11 @@ import tarfile
 import uuid
 import sys
 import click
-import traceback
 from functions import FuncTools
+from constants import CLONE_NEWNS, CLONE_NEWPID, CLONE_NEWUTS, CLONE_NEWNET
 
 tools = FuncTools()
 
-CLONE_NEWNS = 0x00020000
-CLONE_NEWPID = 0x20000000
-CLONE_NEWNET = 0x40000000
-CLONE_NEWCGROUP = 0x02000000
-CLONE_NEWUTS = 0x04000000
 
 dir = os.getcwd()
 
@@ -54,23 +49,29 @@ def _get_container_path(container_id, container_dir, *subdir_names):
 def _setup_cpu_cgroup(container_id, cpu_shares):
     CGROUP_BASE = "/sys/fs/cgroup"
     RUBBER_DOCKER = os.path.join(CGROUP_BASE, "rubber_docker")
-
     container_cgroup = os.path.join(RUBBER_DOCKER, container_id)
     proc_file = os.path.join(container_cgroup, "cgroup.procs")
+
     if not os.path.exists(RUBBER_DOCKER):
         os.makedirs(RUBBER_DOCKER)
-    with open(os.path.join(RUBBER_DOCKER, "cgroup.subtree_control"), "w") as f:
-        f.write("+cpu")
+
+    subtree_control_file = os.path.join(RUBBER_DOCKER, "cgroup.subtree_control")
+    if os.path.exists(subtree_control_file):
+        with open(subtree_control_file, "w") as f:
+            f.write("+cpu")
 
     os.makedirs(container_cgroup, exist_ok=True)
-    open(proc_file, "w").close()
-    print(proc_file)
-    with open(proc_file, "w") as f:
-        f.write(str(os.getpid()))
 
+    if not os.path.exists(proc_file):
+        open(proc_file, "w").close()
+
+    with open(proc_file, "a") as f:
+        f.write(str(os.getpid()))
     if cpu_shares:
         weight = max(1, min(10000, int(cpu_shares * 10000 / 1024)))
-        with open(os.path.join(container_cgroup, "cpu.weight"), "w") as f:
+        cpu_weight_file = os.path.join(container_cgroup, "cpu.weight")
+        print(f"Setting CPU weight to {weight} in {cpu_weight_file}")
+        with open(cpu_weight_file, "w") as f:
             f.write(str(weight))
 
 
@@ -174,15 +175,12 @@ def contain(
     cpu_shares,
     memory,
     memory_swap,
+    user,
 ):
-    try:
-        _setup_cpu_cgroup(container_id, cpu_shares)
-        _setup_memory_cgroup(container_id, memory, memory_swap)
-        tools.sethostname(container_id)
-        subprocess.run(["mount", "--make-rprivate", "/"], check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"Failed to make root private: {e}", file=sys.stderr)
-        raise
+    _setup_cpu_cgroup(container_id, cpu_shares)
+    _setup_memory_cgroup(container_id, memory, memory_swap)
+    tools.sethostname(container_id)
+    subprocess.run(["mount", "--make-rprivate", "/"], check=True)
 
     new_root = create_container_root(image_name, image_dir, container_id, container_dir)
     print("Created a new root fs for our container: {}".format(new_root))
@@ -197,6 +195,24 @@ def contain(
 
     tools.umount("/old_root", 2)
     os.rmdir("/old_root")
+
+    if user:
+        try:
+            if ":" in user:
+                uid, gid = user.split(":")
+                uid = int(uid)
+                gid = int(gid)
+            else:
+                uid = int(user)
+                gid = uid
+
+            os.setgid(gid)
+            os.setuid(uid)
+
+            print(f"Privileges dropped to UID {uid} and GID {gid}")
+        except Exception as e:
+            print(f"Failed to drop privileges: {e}")
+            raise
 
     os.execvp(command[0], command)
 
@@ -219,6 +235,7 @@ def contain(
     default=None,
 )
 @click.option("--cpu-share", "-c", help="CPU shares (relative weight)", default=0)
+@click.option("--user", help="UID (format: <uid>[:<gid>])", default="")
 @click.option("--image-name", "-i", help="Image name", default="ubuntu")
 @click.option(
     "--image-dir", help="Images directory", default=os.path.join(dir, "images/")
@@ -229,10 +246,12 @@ def contain(
     default=os.path.join(dir, "containers/"),
 )
 @click.argument("command", required=True, nargs=-1)
-def run(memory, memory_swap, cpu_share, image_name, image_dir, container_dir, command):
+def run(
+    memory, memory_swap, cpu_share, user, image_name, image_dir, container_dir, command
+):
     container_id = str(uuid.uuid4())
 
-    flags = CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWNET | CLONE_NEWCGROUP
+    flags = CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWNET
     tools.unshare(flags)
     pid = os.fork()
     if pid == 0:
@@ -245,6 +264,7 @@ def run(memory, memory_swap, cpu_share, image_name, image_dir, container_dir, co
             cpu_share,
             memory,
             memory_swap,
+            user,
         )
         os._exit(0)
 

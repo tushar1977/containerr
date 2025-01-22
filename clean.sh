@@ -5,6 +5,7 @@
 # Move to root directory to avoid path issues
 pushd /
 
+sudo rm -rf ./containers/*
 # First cleanup all processes in the cgroups
 if [ -d "/sys/fs/cgroup/rubber_docker" ]; then
   for cgroup in /sys/fs/cgroup/rubber_docker/*; do
@@ -28,8 +29,5 @@ while grep -q workshop /proc/mounts; do
   mnt=$(grep workshop /proc/mounts | shuf | head -n1 | cut -f2 -d' ')
   sudo umount "$mnt" 2>/dev/null || sudo umount -l "$mnt" 2>/dev/null
 done
-
-# Remove container directories
-sudo rm -rf ./containers/*
 
 popd || exit

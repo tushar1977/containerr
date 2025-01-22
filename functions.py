@@ -1,11 +1,8 @@
 import sys
 import os
 import subprocess
-
 import ctypes
-
-NR_pivot_root = 155
-NR_CLONE = 56
+from constants import NR_pivot_root
 
 libc = ctypes.CDLL("libc.so.6", use_errno=True)
 
@@ -22,18 +19,6 @@ class FuncTools:
             print(
                 f"Successfully changed root to {new_root} and moved old root to {put_old}."
             )
-
-    def clone(self, callback, flags):
-        stack_size = 8096
-        stack = ctypes.create_string_buffer(stack_size)
-        stack_top = ctypes.c_void_p(ctypes.addressof(stack) + stack_size)
-
-        f_c = ctypes.CFUNCTYPE(ctypes.c_int)(callback)
-
-        SYS_clone = 56
-        child_tid = libc.syscall(SYS_clone, f_c, stack_top, flags, None)
-
-        return child_tid
 
     def sethostname(self, new_name):
         result = libc.sethostname(new_name.encode("utf-8"), len(new_name))
