@@ -1,4 +1,6 @@
 import os
+from networking import create_bridge, enable_ip_forward
+import random
 import stat
 import subprocess
 import tarfile
@@ -108,7 +110,8 @@ def create_container_root(image_name, image_dir, container_id, container_dir):
     image_path = _get_image_path(image_name, image_dir)
     image_root = os.path.join(image_dir, image_name, "rootfs")
 
-    assert os.path.exists(image_path), "unable to locate image %s" % image_name
+    if not os.path.exists(image_path):
+        raise FileNotFoundError(f"Unable to locate image {image_name}")
 
     if not os.path.exists(image_root):
         os.makedirs(image_root)
@@ -140,7 +143,6 @@ def create_container_root(image_name, image_dir, container_id, container_dir):
             cow_workdir=container_cow_workdir,
         ),
     )
-    print(container_rootfs)
     return container_rootfs
 
 
@@ -176,10 +178,12 @@ def contain(
     memory,
     memory_swap,
     user,
+    container_name,
+    pid,
 ):
     _setup_cpu_cgroup(container_id, cpu_shares)
     _setup_memory_cgroup(container_id, memory, memory_swap)
-    tools.sethostname(container_id)
+    tools.sethostname(container_name)
     subprocess.run(["mount", "--make-rprivate", "/"], check=True)
 
     new_root = create_container_root(image_name, image_dir, container_id, container_dir)
@@ -196,23 +200,20 @@ def contain(
     tools.umount("/old_root", 2)
     os.rmdir("/old_root")
 
+    with open("/etc/hosts", "a") as f:
+        f.write(f"127.0.0.1\t{container_name}\n")
+
     if user:
-        try:
-            if ":" in user:
-                uid, gid = user.split(":")
-                uid = int(uid)
-                gid = int(gid)
-            else:
-                uid = int(user)
-                gid = uid
+        if ":" in user:
+            uid, gid = user.split(":")
+            uid = int(uid)
+            gid = int(gid)
+        else:
+            uid = int(user)
+            gid = uid
 
-            os.setgid(gid)
-            os.setuid(uid)
-
-            print(f"Privileges dropped to UID {uid} and GID {gid}")
-        except Exception as e:
-            print(f"Failed to drop privileges: {e}")
-            raise
+        os.setgid(gid)
+        os.setuid(uid)
 
     os.execvp(command[0], command)
 
@@ -223,9 +224,15 @@ def contain(
     )
 )
 @click.option(
+    "--name",
+    "-n",
+    help="Gives name to containers",
+    default=lambda: f"container{random.randint(1, 100)}",
+)
+@click.option(
     "--memory",
     "-m",
-    help="Memory limit in bytes." " Use suffixes to represent larger units (k, m, g)",
+    help="Memory limit in bytes. Use suffixes to represent larger units (k, m, g)",
     default=None,
 )
 @click.option(
@@ -247,13 +254,26 @@ def contain(
 )
 @click.argument("command", required=True, nargs=-1)
 def run(
-    memory, memory_swap, cpu_share, user, image_name, image_dir, container_dir, command
+    name,
+    memory,
+    memory_swap,
+    cpu_share,
+    user,
+    image_name,
+    image_dir,
+    container_dir,
+    command,
 ):
     container_id = str(uuid.uuid4())
+
+    create_bridge()
+    enable_ip_forward()
 
     flags = CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWNET
     tools.unshare(flags)
     pid = os.fork()
+
+    print(pid)
     if pid == 0:
         contain(
             command,
@@ -265,6 +285,8 @@ def run(
             memory,
             memory_swap,
             user,
+            name,
+            pid,
         )
         os._exit(0)
 
