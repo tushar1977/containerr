@@ -2,9 +2,17 @@ import sys
 import os
 import subprocess
 import ctypes
-from constants import NR_pivot_root
+from constants import CLONE_NEWNET, NR_pivot_root
 
 libc = ctypes.CDLL("libc.so.6", use_errno=True)
+clone = libc.clone
+clone.restype = ctypes.c_int
+clone.argtypes = [
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_int,
+    ctypes.c_void_p,
+]
 
 
 class FuncTools:
@@ -29,6 +37,14 @@ class FuncTools:
         if libc.unshare(flags) != 0:
             errno = ctypes.get_errno()
             raise OSError(errno, f"Failed to unshare: {os.strerror(errno)}")
+
+    def setns(self, netns_name):
+        netns_path = f"/var/run/netns/{netns_name}"
+        with open(netns_path, "r") as f:
+            fd = f.fileno()
+            libc = ctypes.CDLL("libc.so.6")
+            if libc.setns(fd, CLONE_NEWNET) != 0:
+                raise OSError(f"Failed to attach to network namespace {netns_name}")
 
     def umount(self, target, flags):
         ret = libc.umount2(target.encode(), flags)

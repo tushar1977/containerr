@@ -1,5 +1,18 @@
 import os
-from networking import create_bridge, enable_ip_forward
+from pyroute2 import netns, NetNS, IPDB
+from networking import (
+    configure_iptables,
+    container_network,
+    create_bridge,
+    create_namespace,
+    create_veth_pair,
+    enable_ip_forward,
+    generate_gateway_ip,
+    generate_random_ip,
+    generate_random_name,
+    get_active_interface,
+    move_veth,
+)
 import random
 import stat
 import subprocess
@@ -12,6 +25,19 @@ from constants import CLONE_NEWNS, CLONE_NEWPID, CLONE_NEWUTS, CLONE_NEWNET
 
 tools = FuncTools()
 
+subnet = "192.168.1.0/24"
+
+bridge_name = "custom_bridge"
+veth_host = generate_random_name("veth")
+veth_container = generate_random_name("veth")
+bridge_ip = generate_random_ip(subnet)
+container_ip = generate_random_ip(subnet)
+gateway_ip = generate_gateway_ip(subnet)
+
+interface = get_active_interface()
+print("gateway ip", gateway_ip)
+print("container ip", container_ip)
+print("bridge ip", bridge_ip)
 
 dir = os.getcwd()
 
@@ -160,7 +186,7 @@ def _create_mount(new_root):
 
         if not os.path.exists(dev_pts):
             os.makedirs(dev_pts)
-            tools.mount("devpts", dev_pts, "devpts")
+            tools.mount("devpts", dev_pts, "devpts", "gid=5,mode=620")
 
         makedev(dev_path)
     except Exception as e:
@@ -179,8 +205,9 @@ def contain(
     memory_swap,
     user,
     container_name,
-    pid,
+    netns_namespace,
 ):
+    # tools.setns(netns_namespace)
     _setup_cpu_cgroup(container_id, cpu_shares)
     _setup_memory_cgroup(container_id, memory, memory_swap)
     tools.sethostname(container_name)
@@ -264,16 +291,25 @@ def run(
     container_dir,
     command,
 ):
+    create_bridge(bridge_name, bridge_ip)
+    create_veth_pair(veth_host, veth_container, bridge_name)
+    enable_ip_forward()
+    configure_iptables(bridge_name, interface, subnet)
     container_id = str(uuid.uuid4())
 
-    create_bridge()
-    enable_ip_forward()
+    netns_namespace = f"netns_{container_id}"
+    # create_namespace(netns_namespace)
 
-    flags = CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWNET
+    # move_veth(netns_namespace, veth_container)
+    #
+    # container_network(netns_namespace, container_ip, veth_container, gateway_ip)
+
+    flags = CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWNET | CLONE_NEWUTS
     tools.unshare(flags)
-    pid = os.fork()
 
+    pid = os.fork()
     print(pid)
+
     if pid == 0:
         contain(
             command,
@@ -286,8 +322,9 @@ def run(
             memory_swap,
             user,
             name,
-            pid,
+            netns_namespace,
         )
+
         os._exit(0)
 
     _, status = os.waitpid(pid, 0)
