@@ -1,6 +1,6 @@
 import random
+import iptc
 import string
-import subprocess
 from pyroute2 import IPDB, IPRoute, netns
 from pyroute2.nslink.nslink import NetNS
 
@@ -35,6 +35,20 @@ def generate_gateway_ip(subnet):
     ip_parts[3] += 1
 
     return f"{'.'.join(map(str, ip_parts))}"
+
+
+def get_bridge_ip(bridge_name):
+    try:
+        with IPDB() as ipdb:
+            if bridge_name in ipdb.interfaces:
+                bridge = ipdb.interfaces[bridge_name]
+
+                if "ipaddr" in bridge:
+                    return bridge["ipaddr"][0]["address"]
+            return None
+    except Exception as e:
+        print(f"Error fetching IP for bridge {bridge_name}: {e}")
+        return None
 
 
 def create_bridge(bridge_name, bridge_ip):
@@ -82,67 +96,64 @@ def get_active_interface():
     return None
 
 
+def rule_exists(table_name, chain_name, rule):
+    table = iptc.Table(table_name)
+    chain = iptc.Chain(table, chain_name)
+    for existing_rule in chain.rules:
+        if (
+            existing_rule.src == rule.src
+            and existing_rule.out_interface == rule.out_interface
+            and existing_rule.target == rule.target
+        ):
+            return True
+    return False
+
+
 def configure_iptables(bridge_name, interface, container_subnet):
     try:
-        # Add NAT rule to masquerade traffic from the container subnet
-        subprocess.run(
-            [
-                "sudo",
-                "iptables",
-                "-t",
-                "nat",
-                "-A",
-                "POSTROUTING",
-                "-s",
-                container_subnet,
-                "-o",
-                interface,
-                "-j",
-                "MASQUERADE",
-            ],
-            check=True,
-        )
+        table = iptc.Table(iptc.Table.NAT)
+        chain = iptc.Chain(table, "POSTROUTING")
+        rule = iptc.Rule()
+        rule.src = container_subnet
+        rule.out_interface = interface
+        target = iptc.Target(rule, "MASQUERADE")
+        rule.target = target
 
-        # Allow forwarding from the bridge to the external interface
-        subprocess.run(
-            [
-                "sudo",
-                "iptables",
-                "-A",
-                "FORWARD",
-                "-i",
-                bridge_name,
-                "-o",
-                interface,
-                "-j",
-                "ACCEPT",
-            ],
-            check=True,
-        )
+        chain.insert_rule(rule)
 
-        # Allow forwarding for established and related connections
-        subprocess.run(
-            [
-                "sudo",
-                "iptables",
-                "-A",
-                "FORWARD",
-                "-i",
-                interface,
-                "-o",
-                bridge_name,
-                "-m",
-                "state",
-                "--state",
-                "RELATED,ESTABLISHED",
-                "-j",
-                "ACCEPT",
-            ],
-            check=True,
-        )
+        table = iptc.Table(iptc.Table.FILTER)
+        chain = iptc.Chain(table, "FORWARD")
+        rule = iptc.Rule()
+        rule.in_interface = bridge_name
+        rule.out_interface = interface
+        target = iptc.Target(rule, "ACCEPT")
+        rule.target = target
+        chain.insert_rule(rule)
+
+        rule = iptc.Rule()
+        rule.in_interface = interface
+        rule.out_interface = bridge_name
+        rule.state = "RELATED,ESTABLISHED"
+        target = iptc.Target(rule, "ACCEPT")
+        rule.target = target
+        chain.insert_rule(rule)
+
+        chain = iptc.Chain(table, "INPUT")
+        rule = iptc.Rule()
+        rule.in_interface = bridge_name
+        target = iptc.Target(rule, "ACCEPT")
+        rule.target = target
+
+        chain.insert_rule(rule)
+        chain = iptc.Chain(table, "OUTPUT")
+        rule = iptc.Rule()
+        rule.out_interface = bridge_name
+        target = iptc.Target(rule, "ACCEPT")
+        rule.target = target
+        chain.insert_rule(rule)
 
         print("iptables rules configured successfully.")
-    except subprocess.CalledProcessError as e:
+    except Exception as e:
         print(f"Error configuring iptables: {e}")
 
 
@@ -186,7 +197,7 @@ def move_veth(netns_name, veth_container):
         print(f"Error moving {veth_container} to namespace {netns_name}: {e}")
 
 
-def container_network(netns_name, container_ip, veth_container, gateway_ip):
+def container_network(netns_name, container_ip, veth_container, bridge_ip):
     ipr = IPRoute()
     try:
         with IPDB(nl=NetNS(netns_name)) as ns:
@@ -202,7 +213,7 @@ def container_network(netns_name, container_ip, veth_container, gateway_ip):
                 veth_container_if.add_ip(container_ip)
                 veth_container_if.up()
 
-            ns.routes.add({"dst": "default", "gateway": gateway_ip}).commit()
+            ns.routes.add({"dst": "default", "gateway": bridge_ip}).commit()
 
         print(f"Configured network for {veth_container} in namespace {netns_name}.")
     except Exception as e:

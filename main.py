@@ -11,6 +11,7 @@ from networking import (
     generate_random_ip,
     generate_random_name,
     get_active_interface,
+    get_bridge_ip,
     move_veth,
 )
 import random
@@ -25,20 +26,19 @@ from constants import CLONE_NEWNS, CLONE_NEWPID, CLONE_NEWUTS, CLONE_NEWNET
 
 tools = FuncTools()
 
-subnet = "192.168.1.0/24"
+subnet = "192.168.3.0/24"
 
 bridge_name = "custom_bridge"
 veth_host = generate_random_name("veth")
 veth_container = generate_random_name("veth")
-bridge_ip = generate_random_ip(subnet)
 container_ip = generate_random_ip(subnet)
 gateway_ip = generate_gateway_ip(subnet)
+bridge_ip = get_bridge_ip(bridge_name)
+if not bridge_ip:
+    bridge_ip = generate_random_ip(subnet)
+
 
 interface = get_active_interface()
-print("gateway ip", gateway_ip)
-print("container ip", container_ip)
-print("bridge ip", bridge_ip)
-
 dir = os.getcwd()
 
 
@@ -207,14 +207,13 @@ def contain(
     container_name,
     netns_namespace,
 ):
-    # tools.setns(netns_namespace)
+    tools.setns(netns_namespace)
     _setup_cpu_cgroup(container_id, cpu_shares)
     _setup_memory_cgroup(container_id, memory, memory_swap)
     tools.sethostname(container_name)
     subprocess.run(["mount", "--make-rprivate", "/"], check=True)
 
     new_root = create_container_root(image_name, image_dir, container_id, container_dir)
-    print("Created a new root fs for our container: {}".format(new_root))
 
     _create_mount(new_root)
     old_root = os.path.join(new_root, "old_root")
@@ -226,9 +225,6 @@ def contain(
 
     tools.umount("/old_root", 2)
     os.rmdir("/old_root")
-
-    with open("/etc/hosts", "a") as f:
-        f.write(f"127.0.0.1\t{container_name}\n")
 
     if user:
         if ":" in user:
@@ -242,6 +238,8 @@ def contain(
         os.setgid(gid)
         os.setuid(uid)
 
+    with open("/etc/resolv.conf", "w") as f:
+        f.write("nameserver 8.8.8.8")
     os.execvp(command[0], command)
 
 
@@ -298,18 +296,18 @@ def run(
     container_id = str(uuid.uuid4())
 
     netns_namespace = f"netns_{container_id}"
-    # create_namespace(netns_namespace)
+    create_namespace(netns_namespace)
 
-    # move_veth(netns_namespace, veth_container)
-    #
-    # container_network(netns_namespace, container_ip, veth_container, gateway_ip)
+    move_veth(netns_namespace, veth_container)
 
-    flags = CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWNET | CLONE_NEWUTS
+    container_network(netns_namespace, container_ip, veth_container, bridge_ip)
+
+    flags = CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWUTS
     tools.unshare(flags)
 
     pid = os.fork()
-    print(pid)
-
+    if pid > 0:
+        print(pid)
     if pid == 0:
         contain(
             command,

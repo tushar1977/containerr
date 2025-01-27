@@ -23,10 +23,6 @@ class FuncTools:
         if result != 0:
             print(f"pivot_root failed with error code {result}", file=sys.stderr)
             raise OSError(f"pivot_root failed: {os.strerror(ctypes.get_errno())}")
-        else:
-            print(
-                f"Successfully changed root to {new_root} and moved old root to {put_old}."
-            )
 
     def sethostname(self, new_name):
         result = libc.sethostname(new_name.encode("utf-8"), len(new_name))
