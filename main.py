@@ -1,5 +1,6 @@
 import os
 from pyroute2 import netns, NetNS, IPDB
+from pyroute2.ndb.objects import json
 from networking import (
     configure_iptables,
     container_network,
@@ -194,6 +195,29 @@ def _create_mount(new_root):
         raise
 
 
+CONTAINER_METADATA_FILE = os.path.join(dir, "containers", "metadata.json")
+
+
+def save_container_metadata(container_id, name):
+    if os.path.exists(CONTAINER_METADATA_FILE):
+        with open(CONTAINER_METADATA_FILE, "r") as f:
+            metadata = json.load(f)
+    else:
+        metadata = {}
+
+    metadata[name] = container_id
+
+    with open(CONTAINER_METADATA_FILE, "w") as f:
+        json.dump(metadata, f)
+
+
+def load_container_metadata():
+    if os.path.exists(CONTAINER_METADATA_FILE):
+        with open(CONTAINER_METADATA_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+
 def contain(
     command,
     image_name,
@@ -206,41 +230,45 @@ def contain(
     user,
     container_name,
     netns_namespace,
+    container_exist=False,
 ):
-    tools.setns(netns_namespace)
-    _setup_cpu_cgroup(container_id, cpu_shares)
-    _setup_memory_cgroup(container_id, memory, memory_swap)
-    tools.sethostname(container_name)
-    subprocess.run(["mount", "--make-rprivate", "/"], check=True)
+    if not container_exist:
+        tools.setns(netns_namespace)
+        _setup_cpu_cgroup(container_id, cpu_shares)
+        _setup_memory_cgroup(container_id, memory, memory_swap)
+        tools.sethostname(container_name)
+        subprocess.run(["mount", "--make-rprivate", "/"], check=True)
 
-    new_root = create_container_root(image_name, image_dir, container_id, container_dir)
+        new_root = create_container_root(
+            image_name, image_dir, container_id, container_dir
+        )
 
-    _create_mount(new_root)
-    old_root = os.path.join(new_root, "old_root")
-    os.makedirs(old_root)
+        _create_mount(new_root)
+        old_root = os.path.join(new_root, "old_root")
+        os.makedirs(old_root)
 
-    tools.pivot_root(new_root, old_root)
+        tools.pivot_root(new_root, old_root)
 
-    os.chdir("/")
+        os.chdir("/")
 
-    tools.umount("/old_root", 2)
-    os.rmdir("/old_root")
+        tools.umount("/old_root", 2)
+        os.rmdir("/old_root")
 
-    if user:
-        if ":" in user:
-            uid, gid = user.split(":")
-            uid = int(uid)
-            gid = int(gid)
-        else:
-            uid = int(user)
-            gid = uid
+        if user:
+            if ":" in user:
+                uid, gid = user.split(":")
+                uid = int(uid)
+                gid = int(gid)
+            else:
+                uid = int(user)
+                gid = uid
 
-        os.setgid(gid)
-        os.setuid(uid)
+            os.setgid(gid)
+            os.setuid(uid)
 
-    with open("/etc/resolv.conf", "w") as f:
-        f.write("nameserver 8.8.8.8")
-    os.execvp(command[0], command)
+        with open("/etc/resolv.conf", "w") as f:
+            f.write("nameserver 8.8.8.8")
+        os.execvp(command[0], command)
 
 
 @cli.command(
@@ -267,7 +295,7 @@ def contain(
     default=None,
 )
 @click.option("--cpu-share", "-c", help="CPU shares (relative weight)", default=0)
-@click.option("--user", help="UID (format: <uid>[:<gid>])", default="")
+@click.option("--user", help="UID (format: <uid>:<gid>)", default="")
 @click.option("--image-name", "-i", help="Image name", default="ubuntu")
 @click.option(
     "--image-dir", help="Images directory", default=os.path.join(dir, "images/")
@@ -296,6 +324,7 @@ def run(
     container_id = str(uuid.uuid4())
 
     netns_namespace = f"netns_{container_id}"
+    save_container_metadata(container_id, name)
     create_namespace(netns_namespace)
 
     move_veth(netns_namespace, veth_container)
