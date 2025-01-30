@@ -1,0 +1,13 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Create Container</title>
+  </head>
+  <body>
+    <h1>Create a New Container</h1>
+    <form method="post">
+      {% csrf_token %} {{ form.as_p }}
+      <button type="submit">Create Container</button>
+    </form>
+  </body>
+</html>
