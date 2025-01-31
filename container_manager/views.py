@@ -1,10 +1,11 @@
 import os
+from django.core.management.base import BaseCommand
 from django.views.decorators.csrf import csrf_exempt
 import socket
-from django.http import response
+from django.http import HttpResponse, JsonResponse, response
 from django.shortcuts import render, redirect
+from .main import run
 from .form import ContainerForm
-import subprocess
 import threading
 
 SOCKET_ADD = "/var/run/mysock.socket"
@@ -40,6 +41,8 @@ def start_unix_server():
 
 threading.Thread(target=start_unix_server, daemon=True).start()
 
+app_name = __package__.split(".")[0]
+
 
 @csrf_exempt
 def create_container_view(request):
@@ -53,34 +56,22 @@ def create_container_view(request):
             cpu_share = form.cleaned_data["cpu_share"]
             user = form.cleaned_data["user"]
             image_name = form.cleaned_data["image_name"]
+            image_dir = os.path.join(os.getcwd(), app_name, "images/")
+            container_dir = os.path.join(os.getcwd(), app_name, "containers/")
 
-            cli_command = [
-                "sudo",
-                "python3",
-                "../main.py",
-                "run",
-                "--name",
+            code = run(
                 name,
-                "--memory",
                 memory,
-                "--memory-swap",
                 memory_swap,
-                "--cpu-share",
-                str(cpu_share),
-                "--user",
+                cpu_share,
                 user,
-                "--image-name",
                 image_name,
-            ]
+                image_dir,
+                container_dir,
+            )
+            if code == 0:
+                return render(request, "create_container.html", {"form": form})
 
-            cli_command = [arg for arg in cli_command if arg]
-
-            try:
-                subprocess.Popen(cli_command, shell=True)
-                return response.JsonResponse({"status": "done"})
-
-            except Exception as e:
-                return response.JsonResponse({"status": e})
     else:
         form = ContainerForm()
 

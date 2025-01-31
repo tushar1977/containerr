@@ -2,7 +2,7 @@ import sys
 import os
 import subprocess
 import ctypes
-from constants import CLONE_NEWNET, NR_pivot_root
+from .constants import CLONE_NEWNET, NR_pivot_root
 
 libc = ctypes.CDLL("libc.so.6", use_errno=True)
 clone = libc.clone

@@ -22,7 +22,7 @@ import tarfile
 import uuid
 import sys
 import click
-from functions import FuncTools
+from .functions import FuncTools
 from constants import CLONE_NEWNS, CLONE_NEWPID, CLONE_NEWUTS, CLONE_NEWNET
 
 tools = FuncTools()

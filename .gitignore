@@ -2,3 +2,8 @@ __pycache__/
 /containers/*
 images/*
 .venv
+container_manager/containers/*
+container_manager/images/*
+cli/containers/*
+cli/images/*
+db.sqlite3
