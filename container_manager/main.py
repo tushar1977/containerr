@@ -1,6 +1,8 @@
 import os
+import socket
 from pyroute2 import netns, NetNS, IPDB
 from pyroute2.ndb.objects import json
+from pyroute2.netlink.exceptions import time
 from .networking import (
     configure_iptables,
     container_network,
@@ -27,6 +29,7 @@ from .constants import CLONE_NEWNS, CLONE_NEWPID, CLONE_NEWUTS, CLONE_NEWNET
 
 tools = FuncTools()
 
+SOCKET_ADD = "/tmp/mysock.socket"
 subnet = "192.168.3.0/24"
 
 bridge_name = "custom_bridge"
@@ -97,6 +100,33 @@ def _setup_cpu_cgroup(container_id, cpu_shares):
         print(f"Setting CPU weight to {weight} in {cpu_weight_file}")
         with open(cpu_weight_file, "w") as f:
             f.write(str(weight))
+
+
+def send_status():
+    # All relative to containers rootdir("/")
+    socket_path = "/tmp/mysock.socket"
+
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+
+        sock.connect(socket_path)
+        print(f"Connected to Unix socket server at {SOCKET_ADD}")
+
+        message = "create_server_done"
+        sock.sendall(message.encode("utf-8"))
+        print(f"Sent message: {message}")
+
+        sock.close()
+        print("Socket connection closed.")
+
+    except Exception as e:
+        print(f"Error sending status: {e}")
+        print(f"Socket path exists: {os.path.exists(socket_path)}")
+        print(
+            f"Socket path permissions: {oct(os.stat(socket_path).st_mode)}"
+            if os.path.exists(socket_path)
+            else "Socket doesn't exist"
+        )
 
 
 def _setup_memory_cgroup(container_id, memory, memory_swap):
@@ -185,6 +215,23 @@ def _create_mount(new_root):
             tools.mount("devpts", dev_pts, "devpts", "gid=5,mode=620")
 
         makedev(dev_path)
+
+        container_socket_dir = os.path.join(new_root, "tmp")
+        if not os.path.exists(container_socket_dir):
+            os.makedirs(container_socket_dir, exist_ok=True)
+
+        host_socket_path = SOCKET_ADD
+        container_socket_path = os.path.join(new_root, "tmp", "mysock.socket")
+        open(container_socket_path, "a").close()
+
+        if os.path.exists(host_socket_path):
+            try:
+                tools.mount(host_socket_path, container_socket_path, None, "bind")
+                print(f"Bound socket: {host_socket_path} -> {container_socket_path}")
+
+            except Exception as e:
+                print(f"Error setting up container: {e}", file=sys.stderr)
+
     except Exception as e:
         print(f"Error setting up container: {e}", file=sys.stderr)
         raise
@@ -239,6 +286,7 @@ def contain(
 
         with open("/etc/resolv.conf", "w") as f:
             f.write("nameserver 8.8.8.8")
+        send_status()
         os._exit(0)
 
 
@@ -286,8 +334,3 @@ def run(
             name,
             netns_namespace,
         )
-    return 0
-
-    _, status = os.waitpid(pid, 0)
-    exit_code = os.WEXITSTATUS(status)
-    print(f"Child process {pid} exited with status {exit_code}")

@@ -22,7 +22,7 @@ import tarfile
 import uuid
 import sys
 import click
-from .functions import FuncTools
+from functions import FuncTools
 from constants import CLONE_NEWNS, CLONE_NEWPID, CLONE_NEWUTS, CLONE_NEWNET
 
 tools = FuncTools()
@@ -31,7 +31,6 @@ subnet = "192.168.3.0/24"
 
 bridge_name = "custom_bridge"
 veth_host = generate_random_name("veth")
-veth_container = generate_random_name("veth")
 container_ip = generate_random_ip(subnet)
 gateway_ip = generate_gateway_ip(subnet)
 bridge_ip = get_bridge_ip(bridge_name)
@@ -190,32 +189,18 @@ def _create_mount(new_root):
             tools.mount("devpts", dev_pts, "devpts", "gid=5,mode=620")
 
         makedev(dev_path)
+
+        new_sock = os.path.join(new_root, "var", "run", "mysock.socket")
+        if not os.path.exists(new_sock):
+            os.makedirs(new_sock)
+
+        if os.path.exists("/var/run/mysock.socket"):
+            tools.mount("/var/run/mysock.socket", new_sock, None, "bind")
+            print("done binding ")
+
     except Exception as e:
         print(f"Error setting up container: {e}", file=sys.stderr)
         raise
-
-
-CONTAINER_METADATA_FILE = os.path.join(dir, "containers", "metadata.json")
-
-
-def save_container_metadata(container_id, name):
-    if os.path.exists(CONTAINER_METADATA_FILE):
-        with open(CONTAINER_METADATA_FILE, "r") as f:
-            metadata = json.load(f)
-    else:
-        metadata = {}
-
-    metadata[name] = container_id
-
-    with open(CONTAINER_METADATA_FILE, "w") as f:
-        json.dump(metadata, f)
-
-
-def load_container_metadata():
-    if os.path.exists(CONTAINER_METADATA_FILE):
-        with open(CONTAINER_METADATA_FILE, "r") as f:
-            return json.load(f)
-    return {}
 
 
 def contain(
@@ -317,14 +302,15 @@ def run(
     container_dir,
     command,
 ):
+    container_id = str(uuid.uuid4())
+
+    veth_container = f"veth{container_id[0:5]}"
     create_bridge(bridge_name, bridge_ip)
     create_veth_pair(veth_host, veth_container, bridge_name)
     enable_ip_forward()
     configure_iptables(bridge_name, interface, subnet)
-    container_id = str(uuid.uuid4())
 
     netns_namespace = f"netns_{container_id}"
-    save_container_metadata(container_id, name)
     create_namespace(netns_namespace)
 
     move_veth(netns_namespace, veth_container)

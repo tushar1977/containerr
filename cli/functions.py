@@ -2,7 +2,7 @@ import sys
 import os
 import subprocess
 import ctypes
-from .constants import CLONE_NEWNET, NR_pivot_root
+from constants import CLONE_NEWNET, NR_pivot_root
 
 libc = ctypes.CDLL("libc.so.6", use_errno=True)
 clone = libc.clone
@@ -51,10 +51,11 @@ class FuncTools:
 
     def mount(self, source, target, fs_type, options=None):
         cmd = ["mount"]
-        if fs_type:
-            cmd.extend(["-t", fs_type])
+
         if options:
             cmd.extend(["-o", options])
+        if fs_type:
+            cmd.extend(["-t", fs_type])
         cmd.extend([source, target])
 
         try:
