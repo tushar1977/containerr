@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Create Container</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Oxygen, Ubuntu, Cantarell, sans-serif;
+      }
+
+      body {
+        min-height: 100vh;
+        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        padding: 2rem;
+        color: #2d3748;
+      }
+
+      .container {
+        max-width: 800px;
+        margin: 0 auto;
+        background: white;
+        padding: 2rem;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      }
+
+      h1 {
+        text-align: center;
+        margin-bottom: 2rem;
+        color: #2d3748;
+        font-size: 2rem;
+      }
+
+      form {
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+        margin-bottom: 2rem;
+      }
+
+      .form-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      label {
+        font-weight: 600;
+        color: #4a5568;
+        font-size: 0.95rem;
+      }
+
+      input {
+        padding: 0.75rem;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+        font-size: 1rem;
+        transition: all 0.2s;
+      }
+
+      input:focus {
+        outline: none;
+        border-color: #4299e1;
+        box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.1);
+      }
+
+      input:not(:placeholder-shown):valid {
+        border-color: #48bb78;
+      }
+
+      .help-text {
+        font-size: 0.85rem;
+        color: #718096;
+        margin-top: 0.25rem;
+      }
+
+      button {
+        background: #48bb78;
+        color: white;
+        padding: 0.75rem 1.5rem;
+        border: none;
+        border-radius: 6px;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background-color 0.2s;
+        align-self: flex-start;
+      }
+
+      button:hover {
+        background: #38a169;
+      }
+
+      .container-list {
+        margin-top: 3rem;
+        border-top: 2px solid #e2e8f0;
+        padding-top: 2rem;
+      }
+
+      .container-item {
+        background: #f7fafc;
+        padding: 1rem;
+        border-radius: 6px;
+        margin-bottom: 1rem;
+      }
+
+      .no-containers {
+        text-align: center;
+        color: #718096;
+        font-style: italic;
+      }
+
+      .error-message {
+        color: #e53e3e;
+        font-size: 0.875rem;
+        margin-top: 0.25rem;
+      }
+
+      @media (max-width: 768px) {
+        body {
+          padding: 1rem;
+        }
+
+        .container {
+          padding: 1.5rem;
+        }
+
+        h1 {
+          font-size: 1.75rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Create a New Container</h1>
+
+      <form method="post" action="">
+        {% csrf_token %}
+
+        <div class="form-group">
+          <label for="id_name">Container Name</label>
+          {{ form.name }} {% if form.name.errors %}
+          <div class="error-message">{{ form.name.errors }}</div>
+          {% endif %}
+        </div>
+
+        <div class="form-group">
+          <label for="id_memory">Memory Limit</label>
+          {{ form.memory }}
+          <div class="help-text">Format: 512m, 1g, etc.</div>
+          {% if form.memory.errors %}
+          <div class="error-message">{{ form.memory.errors }}</div>
+          {% endif %}
+        </div>
+
+        <div class="form-group">
+          <label for="id_memory_swap">Memory Swap</label>
+          {{ form.memory_swap }}
+          <div class="help-text">Format: 1g, -1 for unlimited</div>
+          {% if form.memory_swap.errors %}
+          <div class="error-message">{{ form.memory_swap.errors }}</div>
+          {% endif %}
+        </div>
+
+        <div class="form-group">
+          <label for="id_cpu_share">CPU Shares</label>
+          {{ form.cpu_share }}
+          <div class="help-text">Relative weight for CPU allocation</div>
+          {% if form.cpu_share.errors %}
+          <div class="error-message">{{ form.cpu_share.errors }}</div>
+          {% endif %}
+        </div>
+
+        <div class="form-group">
+          <label for="id_user">User</label>
+          {{ form.user }}
+          <div class="help-text">Format: uid:gid</div>
+          {% if form.user.errors %}
+          <div class="error-message">{{ form.user.errors }}</div>
+          {% endif %}
+        </div>
+
+        <div class="form-group">
+          <label for="id_image_name">Image Name</label>
+          {{ form.image_name }} {% if form.image_name.errors %}
+          <div class="error-message">{{ form.image_name.errors }}</div>
+          {% endif %}
+        </div>
+
+        <button type="submit">Create Container</button>
+      </form>
+
+      <div class="container-list">
+        {% if container_list %} {% for container in container_list %}
+        <div class="container-item">
+          <h2>{{ container }}</h2>
+        </div>
+        {% endfor %} {% else %}
+        <p class="no-containers">No containers available.</p>
+        {% endif %}
+      </div>
+    </div>
+  </body>
+</html>

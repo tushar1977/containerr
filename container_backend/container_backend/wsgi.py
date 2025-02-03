@@ -1,5 +1,5 @@
 """
-WSGI config for container_manager project.
+WSGI config for container_backend project.
 
 It exposes the WSGI callable as a module-level variable named ``application``.
 
@@ -11,6 +11,6 @@ import os
 
 from django.core.wsgi import get_wsgi_application
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'container_manager.settings')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'container_backend.settings')
 
 application = get_wsgi_application()

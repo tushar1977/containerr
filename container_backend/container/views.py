@@ -4,12 +4,18 @@ from django.views.decorators.csrf import csrf_exempt
 import socket
 from django.http import HttpResponse, JsonResponse, response
 from django.shortcuts import render, redirect
+from rest_framework.views import View
 from .main import run
 from .form import ContainerForm
 import threading
 
+
 SOCKET_ADD = "/tmp/mysock.socket"
 server_ready = threading.Event()
+
+
+def home(request):
+    return render(request, "home_page.html")
 
 
 def start_unix_server():
@@ -49,6 +55,18 @@ app_name = __package__.split(".")[0]
 containers_created = []
 
 
+def delete_container(request):
+    pass
+
+
+def execute_container(request):
+    pass
+
+
+def monitor_container(request):
+    pass
+
+
 @csrf_exempt
 def create_container_view(request):
     if request.method == "POST":
@@ -63,6 +81,7 @@ def create_container_view(request):
             image_name = form.cleaned_data["image_name"]
             image_dir = os.path.join(os.getcwd(), app_name, "images/")
             container_dir = os.path.join(os.getcwd(), app_name, "containers/")
+            command = "/bin/bash"
 
             run(
                 name,
@@ -73,6 +92,8 @@ def create_container_view(request):
                 image_name,
                 image_dir,
                 container_dir,
+                command,
+                exec=True,
             )
             return render(request, "create_container.html", {"form": form})
 

@@ -1,6 +1,6 @@
 import os
 import socket
-from pyroute2 import netns, NetNS, IPDB
+from pyroute2 import common, netns, NetNS, IPDB
 from pyroute2.ndb.objects import json
 from pyroute2.netlink.exceptions import time
 from .networking import (
@@ -248,46 +248,48 @@ def contain(
     user,
     container_name,
     netns_namespace,
-    container_exist=False,
+    command,
+    exec=False,
 ):
-    if not container_exist:
-        tools.setns(netns_namespace)
-        _setup_cpu_cgroup(container_id, cpu_shares)
-        _setup_memory_cgroup(container_id, memory, memory_swap)
-        tools.sethostname(container_name)
-        subprocess.run(["mount", "--make-rprivate", "/"], check=True)
+    tools.setns(netns_namespace)
+    _setup_cpu_cgroup(container_id, cpu_shares)
+    _setup_memory_cgroup(container_id, memory, memory_swap)
+    tools.sethostname(container_name)
+    subprocess.run(["mount", "--make-rprivate", "/"], check=True)
 
-        new_root = create_container_root(
-            image_name, image_dir, container_id, container_dir
-        )
+    new_root = create_container_root(image_name, image_dir, container_id, container_dir)
 
-        _create_mount(new_root)
-        old_root = os.path.join(new_root, "old_root")
-        os.makedirs(old_root)
+    _create_mount(new_root)
+    old_root = os.path.join(new_root, "old_root")
+    os.makedirs(old_root)
 
-        tools.pivot_root(new_root, old_root)
+    tools.pivot_root(new_root, old_root)
 
-        os.chdir("/")
+    os.chdir("/")
 
-        tools.umount("/old_root", 2)
-        os.rmdir("/old_root")
+    tools.umount("/old_root", 2)
+    os.rmdir("/old_root")
 
-        if user:
-            if ":" in user:
-                uid, gid = user.split(":")
-                uid = int(uid)
-                gid = int(gid)
-            else:
-                uid = int(user)
-                gid = uid
+    if user:
+        if ":" in user:
+            uid, gid = user.split(":")
+            uid = int(uid)
+            gid = int(gid)
+        else:
+            uid = int(user)
+            gid = uid
 
-            os.setgid(gid)
-            os.setuid(uid)
+        os.setgid(gid)
+        os.setuid(uid)
 
-        with open("/etc/resolv.conf", "w") as f:
-            f.write("nameserver 8.8.8.8")
-        send_status()
-        os._exit(0)
+    with open("/etc/resolv.conf", "w") as f:
+        f.write("nameserver 8.8.8.8")
+
+    if exec:
+        os.execvp(command[0], command)
+
+    send_status()
+    os._exit(0)
 
 
 def run(
@@ -299,6 +301,8 @@ def run(
     image_name,
     image_dir,
     container_dir,
+    command,
+    exec=False,
 ):
     container_id = str(uuid.uuid4())
 
@@ -333,4 +337,6 @@ def run(
             user,
             name,
             netns_namespace,
+            command,
+            exec,
         )

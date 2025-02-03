@@ -1,5 +1,5 @@
 """
-URL configuration for container_manager project.
+URL configuration for container_backend project.
 
 The `urlpatterns` list routes URLs to views. For more information please see:
     https://docs.djangoproject.com/en/5.1/topics/http/urls/
@@ -17,6 +17,9 @@ Including another URLconf
 
 from django.contrib import admin
 from django.urls import include, path
-from . import views
+from container import views
 
-urlpatterns = [path("admin/", admin.site.urls), path("", views.create_container_view)]
+urlpatterns = [
+    path("admin/", admin.site.urls),
+    path("", include("container.urls")),
+]

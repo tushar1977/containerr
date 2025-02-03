@@ -2,8 +2,10 @@ __pycache__/
 /containers/*
 images/*
 .venv
-container_manager/containers/*
-container_manager/images/*
+container_backend/container/containers/*
+container_backend/container/images/*
+container_backend/container/migrations
+container/images/*
 cli/containers/*
 cli/images/*
 db.sqlite3
