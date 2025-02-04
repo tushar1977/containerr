@@ -1,4 +1,7 @@
 import os
+import fnmatch
+import shutil
+import re
 import socket
 from pyroute2 import common, netns, NetNS, IPDB
 from pyroute2.ndb.objects import json
@@ -28,10 +31,9 @@ from .functions import FuncTools
 from .constants import CLONE_NEWNS, CLONE_NEWPID, CLONE_NEWUTS, CLONE_NEWNET
 
 tools = FuncTools()
-
 SOCKET_ADD = "/tmp/mysock.socket"
-subnet = "192.168.3.0/24"
 
+subnet = "192.168.3.0/24"
 bridge_name = "custom_bridge"
 container_ip = generate_random_ip(subnet)
 
@@ -158,7 +160,9 @@ def _setup_memory_cgroup(container_id, memory, memory_swap):
             f.write(str(memory_swap))
 
 
-def create_container_root(image_name, image_dir, container_id, container_dir):
+def create_container_root(
+    image_name, image_dir, container_id, container_name, container_dir
+):
     image_path = _get_image_path(image_name, image_dir)
     image_root = os.path.join(image_dir, image_name, "rootfs")
 
@@ -176,11 +180,15 @@ def create_container_root(image_name, image_dir, container_id, container_dir):
         ]
         t.extractall(image_root, members=members)
 
-    container_cow_rw = _get_container_path(container_id, container_dir, "cow_rs")
-    container_cow_workdir = _get_container_path(
-        container_id, container_dir, "cow_workdir"
+    container_cow_rw = _get_container_path(
+        f"{container_name}_{container_id}", container_dir, "cow_rs"
     )
-    container_rootfs = _get_container_path(container_id, container_dir, "rootfs")
+    container_cow_workdir = _get_container_path(
+        f"{container_name}_{container_id}", container_dir, "cow_workdir"
+    )
+    container_rootfs = _get_container_path(
+        f"{container_name}_{container_id}", container_dir, "rootfs"
+    )
     for d in (container_cow_rw, container_cow_workdir, container_rootfs):
         if not os.path.exists(d):
             os.makedirs(d)
@@ -257,7 +265,9 @@ def contain(
     tools.sethostname(container_name)
     subprocess.run(["mount", "--make-rprivate", "/"], check=True)
 
-    new_root = create_container_root(image_name, image_dir, container_id, container_dir)
+    new_root = create_container_root(
+        image_name, image_dir, container_id, container_name, container_dir
+    )
 
     _create_mount(new_root)
     old_root = os.path.join(new_root, "old_root")
@@ -292,6 +302,30 @@ def contain(
     os._exit(0)
 
 
+def delete_container(name, container_dir):
+    try:
+        for dir_name in os.listdir(container_dir):
+            if fnmatch.fnmatch(dir_name, f"{name}_*"):
+                full_path = os.path.join(container_dir, dir_name)
+                shutil.rmtree(full_path)
+                print(f"Deleted: {full_path}")
+                return
+
+        print("No matching container found.")
+
+    except Exception as e:
+        print(f"Error: {e}")
+
+
+def check_container(container_dir, container_name):
+    match = re.findall(r"^(.*?)_", container_name, re.IGNORECASE)
+    extracted_name = match[0]
+    for dir_name in os.listdir(container_dir):
+        if dir_name.startswith(extracted_name + "_"):
+            return True
+    return False
+
+
 def run(
     name,
     memory,
@@ -305,6 +339,9 @@ def run(
     exec=False,
 ):
     container_id = str(uuid.uuid4())
+    if check_container(container_dir, f"{name}_{container_id}"):
+        print(f"Container with name '{name}' already exists.")
+        return
 
     veth_container = f"veth{container_id[0:5]}"
     create_bridge(bridge_name, bridge_ip)

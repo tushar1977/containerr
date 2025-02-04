@@ -1,12 +1,9 @@
 import os
-from django.core.management.base import BaseCommand
 from django.views.decorators.csrf import csrf_exempt
 import socket
-from django.http import HttpResponse, JsonResponse, response
 from django.shortcuts import render, redirect
-from rest_framework.views import View
-from .main import run
-from .form import ContainerForm
+from .main import delete_container, run
+from .form import ContainerForm, DeleteContainerForm
 import threading
 
 
@@ -55,8 +52,20 @@ app_name = __package__.split(".")[0]
 containers_created = []
 
 
-def delete_container(request):
-    pass
+def delete_container_view(request):
+    if request.method == "GET":
+        form = DeleteContainerForm()
+        return render(request, "delete_container.html", {"form": form})
+
+    else:
+        form = DeleteContainerForm(request.POST)
+        if form.is_valid():
+            name = form.cleaned_data["name"]
+
+            container_dir = os.path.join(os.getcwd(), app_name, "containers/")
+            delete_container(name, container_dir)
+
+            return render(request, "delete_container.html", {"form": form})
 
 
 def execute_container(request):
@@ -93,7 +102,6 @@ def create_container_view(request):
                 image_dir,
                 container_dir,
                 command,
-                exec=True,
             )
             return render(request, "create_container.html", {"form": form})
 

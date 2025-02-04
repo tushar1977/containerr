@@ -10,3 +10,7 @@ class ContainerForm(forms.Form):
     cpu_share = forms.IntegerField(label="CPU Shares (relative weight)", required=False)
     user = forms.CharField(label="User (format: <uid>:<gid>)", required=False)
     image_name = forms.CharField(label="Image Name", initial="ubuntu")
+
+
+class DeleteContainerForm(forms.Form):
+    name = forms.CharField(label="Container Name", required=True)
