@@ -1,9 +1,10 @@
 import os
+from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
 import socket
 from django.shortcuts import render, redirect
 from .main import delete_container, run
-from .form import ContainerForm, DeleteContainerForm
+from .form import ContainerForm, DeleteContainerForm, ExecuteContainerForm
 import threading
 
 
@@ -68,8 +69,18 @@ def delete_container_view(request):
             return render(request, "delete_container.html", {"form": form})
 
 
-def execute_container(request):
-    pass
+def execute_container_view(request):
+    if request.method == "POST":
+        form = ExecuteContainerForm(request.POST)
+        if form.is_valid():
+            name = form.cleaned_data["name"]
+            command = form.cleaned_data["command"]
+
+            return redirect(f"{reverse('terminal')}?name={name}&command={command}")
+
+    else:
+        form = ExecuteContainerForm()
+        return render(request, "execute_container.html", {"form": form})
 
 
 def monitor_container(request):

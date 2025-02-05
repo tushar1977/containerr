@@ -20,6 +20,12 @@
           {% endif %}
         </div>
 
+        <div class="form-group">
+          <label for="id_command">Command to execute</label>
+          {{ form.command }} {% if form.name.errors %}
+          <div class="error-message">{{ form.name.errors }}</div>
+          {% endif %}
+        </div>
         <button type="submit">Delete Container</button>
       </form>
     </div>

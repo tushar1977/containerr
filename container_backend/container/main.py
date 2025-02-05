@@ -319,11 +319,16 @@ def delete_container(name, container_dir):
 
 def check_container(container_dir, container_name):
     match = re.findall(r"^(.*?)_", container_name, re.IGNORECASE)
+    if not match:
+        return False, None
+
     extracted_name = match[0]
+
     for dir_name in os.listdir(container_dir):
         if dir_name.startswith(extracted_name + "_"):
-            return True
-    return False
+            return True, dir_name
+
+    return False, None
 
 
 def run(
@@ -339,7 +344,8 @@ def run(
     exec=False,
 ):
     container_id = str(uuid.uuid4())
-    if check_container(container_dir, f"{name}_{container_id}"):
+    flag, _ = check_container(container_dir, f"{name}_{container_id}")
+    if flag:
         print(f"Container with name '{name}' already exists.")
         return
 
@@ -377,3 +383,30 @@ def run(
             command,
             exec,
         )
+
+
+def execute_container(container_name, container_dir, command):
+    flag, dir_name = check_container(container_dir, container_name)
+    if not flag and dir_name:
+        print(f"Container {container_name} not found.")
+        return
+
+    container_path = os.path.join(container_dir, dir_name, "rootfs")
+    print("executes")
+    try:
+        old_root = os.path.join(container_path, "old_root")
+        os.makedirs(old_root, exist_ok=True)
+
+        tools.pivot_root(container_path, old_root)
+
+        os.chdir("/")
+
+        tools.umount("/old_root", 2)
+        os.rmdir("/old_root")
+
+        os.chdir("/")
+        os.execvp(command[0], command)
+
+    except Exception as e:
+        print(e)
+        raise

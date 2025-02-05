@@ -14,3 +14,10 @@ class ContainerForm(forms.Form):
 
 class DeleteContainerForm(forms.Form):
     name = forms.CharField(label="Container Name", required=True)
+
+
+class ExecuteContainerForm(forms.Form):
+    name = forms.CharField(label="Container Name", required=True)
+    command = forms.CharField(
+        label="Container Name", required=True, initial="/bin/bash"
+    )
