@@ -26,7 +26,9 @@ SECRET_KEY = "django-insecure-v!m&1x4m))6qxabnm91o70t@@=k)ybkzrx)=hpieoet57!@91m
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+
+ALLOWED_HOSTS = ["127.0.0.1", "0.0.0.0", "localhost"]
+SECURE_CROSS_ORIGIN_OPENER_POLICY = None
 
 
 # Application definition
@@ -39,6 +41,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "container",
+    "django_xterm_terminal",
 ]
 
 MIDDLEWARE = [
@@ -69,18 +72,11 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = "container_backend.wsgi.application"
+ASGI_APPLICATION = "container_backend.wsgi.application"
 
 
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
-
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
-    }
-}
 
 
 # Password validation
