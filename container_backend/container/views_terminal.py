@@ -3,6 +3,13 @@ from django.shortcuts import render
 import socketio
 import pty
 import select
+
+from container.constants import (
+    CLONE_NEWNS,
+    CLONE_NEWPID,
+    CLONE_NEWUTS,
+)
+from container.functions import FuncTools
 from . import main
 import struct
 import fcntl
@@ -77,7 +84,11 @@ app_name = __package__.split(".")[0]
 @sio.event
 async def connect(sid, environ):
     global fd, name, child_pid, command_e
+    print(name)
 
+    image_name = "ubuntu"
+    image_dir = os.path.join(os.getcwd(), app_name, "images/")
+    print(command_e)
     container_dir = os.path.join(os.getcwd(), app_name, "containers/")
     if child_pid:
         os.write(fd, "\n".encode())
@@ -85,10 +96,14 @@ async def connect(sid, environ):
 
     try:
         child_pid, fd = pty.fork()
-        if child_pid == 0:
-            main.execute_container(name, container_dir, [command_e])
-        else:
+        if child_pid > 0:
+            print(child_pid)
+
             sio.start_background_task(read_and_forward_pty_output)
+        if child_pid == 0:
+            main.execute_container(
+                image_name, image_dir, name, container_dir, [command_e]
+            )
     except OSError as e:
         print(f"Error creating PTY: {e}")
         child_pid = None
@@ -102,13 +117,11 @@ async def disconnect(sid):
 
     if child_pid:
         try:
-            # kill pty process
             os.kill(child_pid, signal.SIGKILL)
             os.wait()
         except OSError as e:
             print(f"Error killing process: {e}")
         finally:
-            # reset the variables
             fd = None
             child_pid = None
             print("Client disconnected")

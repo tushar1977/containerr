@@ -132,7 +132,9 @@ def _setup_memory_cgroup(container_id, memory, memory_swap):
             f.write(str(memory_swap))
 
 
-def create_container_root(image_name, image_dir, container_id, container_dir):
+def create_container_root(
+    image_name, image_dir, container_id, container_name, container_dir
+):
     image_path = _get_image_path(image_name, image_dir)
     image_root = os.path.join(image_dir, image_name, "rootfs")
 
@@ -150,11 +152,15 @@ def create_container_root(image_name, image_dir, container_id, container_dir):
         ]
         t.extractall(image_root, members=members)
 
-    container_cow_rw = _get_container_path(container_id, container_dir, "cow_rs")
-    container_cow_workdir = _get_container_path(
-        container_id, container_dir, "cow_workdir"
+    container_cow_rw = _get_container_path(
+        f"{container_name}_{container_id}", container_dir, "cow_rs"
     )
-    container_rootfs = _get_container_path(container_id, container_dir, "rootfs")
+    container_cow_workdir = _get_container_path(
+        f"{container_name}_{container_id}", container_dir, "cow_workdir"
+    )
+    container_rootfs = _get_container_path(
+        f"{container_name}_{container_id}", container_dir, "rootfs"
+    )
     for d in (container_cow_rw, container_cow_workdir, container_rootfs):
         if not os.path.exists(d):
             os.makedirs(d)
@@ -169,7 +175,23 @@ def create_container_root(image_name, image_dir, container_id, container_dir):
             cow_workdir=container_cow_workdir,
         ),
     )
+    print(container_rootfs)
     return container_rootfs
+
+
+def _unmount(new_root):
+    proc_path = os.path.join(new_root, "proc")
+    sys_path = os.path.join(new_root, "sys")
+    dev_path = os.path.join(new_root, "dev")
+
+    dev_pts = os.path.join(new_root, "dev", "pts")
+
+    try:
+        for d in (proc_path, sys_path, dev_path, dev_pts):
+            if os.path.exists(d):
+                tools.umount(d, 2)
+    except Exception as e:
+        print(e)
 
 
 def _create_mount(new_root):
@@ -218,6 +240,7 @@ def contain(
     container_exist=False,
 ):
     if not container_exist:
+        print(container_name)
         tools.setns(netns_namespace)
         _setup_cpu_cgroup(container_id, cpu_shares)
         _setup_memory_cgroup(container_id, memory, memory_swap)
@@ -225,7 +248,7 @@ def contain(
         subprocess.run(["mount", "--make-rprivate", "/"], check=True)
 
         new_root = create_container_root(
-            image_name, image_dir, container_id, container_dir
+            image_name, image_dir, container_id, container_name, container_dir
         )
 
         _create_mount(new_root)
@@ -343,6 +366,83 @@ def run(
     _, status = os.waitpid(pid, 0)
     exit_code = os.WEXITSTATUS(status)
     print(f"Child process {pid} exited with status {exit_code}")
+
+
+def check_container(container_dir, container_name):
+    for dir_name in os.listdir(container_dir):
+        if dir_name.startswith(f"{container_name}_"):
+            parts = dir_name.split("_", 1)
+            return True, parts[0], parts[1]
+
+    return False, None, None
+
+
+@cli.command(
+    context_settings=dict(
+        ignore_unknown_options=True,
+    )
+)
+@click.option("--image-name", "-i", help="Image name", default="ubuntu")
+@click.option(
+    "--image-dir", help="Images directory", default=os.path.join(dir, "images/")
+)
+@click.option(
+    "--name",
+    "-n",
+    help="Gives name to containers",
+)
+@click.option(
+    "--container-dir",
+    help="Containers directory",
+    default=os.path.join(dir, "containers/"),
+)
+@click.argument("command", required=True, nargs=-1)
+def exec(image_name, image_dir, name, container_dir, command):
+    print(name)
+    image_path = os.path.join(image_dir, f"{image_name}.tar")
+    flag, name, id = check_container(container_dir, name)
+    print(f"{name}_{id}")
+    if not flag:
+        print("Container not exisits")
+        return
+
+    container_path = os.path.join(container_dir, f"{name}_{id}")
+    image_root = os.path.join(container_dir, container_path, "rootfs")
+
+    if not os.path.exists(image_path):
+        raise FileNotFoundError(f"Unable to locate image {image_name}")
+
+    if not os.path.exists(image_root):
+        os.makedirs(image_root)
+    try:
+        with tarfile.open(image_path) as t:
+            members = [
+                m
+                for m in t.getmembers()
+                if m.type not in (tarfile.CHRTYPE, tarfile.BLKTYPE)
+            ]
+            t.extractall(image_root, members=members)
+
+            flags = CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWUTS
+            tools.unshare(flags)
+
+            pid = os.fork()
+            if pid > 0:
+                print(pid)
+            if pid == 0:
+                _create_mount(image_root)
+
+                old_root = os.path.join(image_root, "old_root")
+                if not os.path.exists(old_root):
+                    os.makedirs(old_root, exist_ok=True)
+                print(image_root)
+
+                os.chroot(image_root)
+                os.chdir("/")
+                os.execvp(command[0], command)
+    except Exception as e:
+        _unmount(image_root)
+        print(e)
 
 
 if __name__ == "__main__":

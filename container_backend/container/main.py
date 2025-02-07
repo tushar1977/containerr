@@ -203,14 +203,19 @@ def create_container_root(
             cow_workdir=container_cow_workdir,
         ),
     )
+    print(container_rootfs)
     return container_rootfs
 
 
 def _create_mount(new_root):
     proc_path = os.path.join(new_root, "proc")
+    print(proc_path)
     sys_path = os.path.join(new_root, "sys")
     dev_path = os.path.join(new_root, "dev")
 
+    for d in (proc_path, sys_path, dev_path):
+        if not os.path.exists(d):
+            os.makedirs(d)
     try:
         tools.mount("proc", proc_path, "proc")
         tools.mount("sysfs", sys_path, "sysfs")
@@ -264,7 +269,6 @@ def contain(
     _setup_memory_cgroup(container_id, memory, memory_swap)
     tools.sethostname(container_name)
     subprocess.run(["mount", "--make-rprivate", "/"], check=True)
-
     new_root = create_container_root(
         image_name, image_dir, container_id, container_name, container_dir
     )
@@ -295,9 +299,6 @@ def contain(
     with open("/etc/resolv.conf", "w") as f:
         f.write("nameserver 8.8.8.8")
 
-    if exec:
-        os.execvp(command[0], command)
-
     send_status()
     os._exit(0)
 
@@ -318,17 +319,12 @@ def delete_container(name, container_dir):
 
 
 def check_container(container_dir, container_name):
-    match = re.findall(r"^(.*?)_", container_name, re.IGNORECASE)
-    if not match:
-        return False, None
-
-    extracted_name = match[0]
-
     for dir_name in os.listdir(container_dir):
-        if dir_name.startswith(extracted_name + "_"):
-            return True, dir_name
+        if dir_name.startswith(f"{container_name}_"):
+            parts = dir_name.split("_", 1)
+            return True, parts[0], parts[1]
 
-    return False, None
+    return False, None, None
 
 
 def run(
@@ -344,7 +340,7 @@ def run(
     exec=False,
 ):
     container_id = str(uuid.uuid4())
-    flag, _ = check_container(container_dir, f"{name}_{container_id}")
+    flag, _, _ = check_container(container_dir, f"{name}_{container_id}")
     if flag:
         print(f"Container with name '{name}' already exists.")
         return
@@ -385,28 +381,39 @@ def run(
         )
 
 
-def execute_container(container_name, container_dir, command):
-    flag, dir_name = check_container(container_dir, container_name)
-    if not flag and dir_name:
-        print(f"Container {container_name} not found.")
+def execute_container(image_name, image_dir, container_name, container_dir, command):
+    image_path = os.path.join(image_dir, f"{image_name}.tar")
+    flag, name, id = check_container(container_dir, container_name)
+
+    if not flag:
+        print("Container not exisits")
         return
 
-    container_path = os.path.join(container_dir, dir_name, "rootfs")
-    print("executes")
-    try:
-        old_root = os.path.join(container_path, "old_root")
-        os.makedirs(old_root, exist_ok=True)
+    container_path = os.path.join(container_dir, f"{name}_{id}")
+    image_root = os.path.join(container_dir, container_path, "rootfs")
 
-        tools.pivot_root(container_path, old_root)
+    if not os.path.exists(image_path):
+        raise FileNotFoundError(f"Unable to locate image {image_name}")
 
-        os.chdir("/")
+    if not os.path.exists(image_root):
+        os.makedirs(image_root)
 
-        tools.umount("/old_root", 2)
-        os.rmdir("/old_root")
+    with tarfile.open(image_path) as t:
+        members = [
+            m
+            for m in t.getmembers()
+            if m.type not in (tarfile.CHRTYPE, tarfile.BLKTYPE)
+        ]
+        t.extractall(image_root, members=members)
 
-        os.chdir("/")
-        os.execvp(command[0], command)
+    _create_mount(image_root)
 
-    except Exception as e:
-        print(e)
-        raise
+    old_root = os.path.join(image_root, "old_root")
+    os.makedirs(old_root, exist_ok=True)
+    tools.pivot_root(image_root, old_root)
+    os.chdir("/")
+
+    tools.umount("/old_root", 2)
+    os.rmdir("/old_root")
+
+    os.execvp(command[0], command)
