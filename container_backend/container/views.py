@@ -69,20 +69,6 @@ def delete_container_view(request):
             return render(request, "delete_container.html", {"form": form})
 
 
-def execute_container_view(request):
-    if request.method == "POST":
-        form = ExecuteContainerForm(request.POST)
-        if form.is_valid():
-            name = form.cleaned_data["name"]
-            command = form.cleaned_data["command"]
-
-            return redirect(f"{reverse('terminal')}?name={name}&command={command}")
-
-    else:
-        form = ExecuteContainerForm()
-        return render(request, "execute_container.html", {"form": form})
-
-
 def monitor_container(request):
     pass
 
@@ -103,19 +89,20 @@ def create_container_view(request):
             container_dir = os.path.join(os.getcwd(), app_name, "containers/")
             command = "/bin/bash"
 
-            run(
-                name,
-                memory,
-                memory_swap,
-                cpu_share,
-                user,
-                image_name,
-                image_dir,
-                container_dir,
-                command,
-            )
-            return render(request, "create_container.html", {"form": form})
+            data = {
+                "name": name,
+                "memory": memory,
+                "memory_swap": memory_swap,
+                "cpu_share": cpu_share,
+                "user": user,
+                "image_name": image_name,
+                "image_dir": image_dir,
+                "container_dir": container_dir,
+                "command": command,
+            }
 
+            request.session["data"] = data
+            return redirect("terminal")
     else:
         form = ContainerForm()
 

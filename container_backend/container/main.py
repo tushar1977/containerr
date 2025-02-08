@@ -207,6 +207,21 @@ def create_container_root(
     return container_rootfs
 
 
+def _unmount(new_root):
+    proc_path = os.path.join(new_root, "proc")
+    sys_path = os.path.join(new_root, "sys")
+    dev_path = os.path.join(new_root, "dev")
+
+    dev_pts = os.path.join(new_root, "dev", "pts")
+
+    try:
+        for d in (proc_path, sys_path, dev_path, dev_pts):
+            if os.path.exists(d):
+                tools.umount(d, 2)
+    except Exception as e:
+        print(e)
+
+
 def _create_mount(new_root):
     proc_path = os.path.join(new_root, "proc")
     print(proc_path)
@@ -250,6 +265,9 @@ def _create_mount(new_root):
         raise
 
 
+new_root = ""
+
+
 def contain(
     image_name,
     image_dir,
@@ -262,45 +280,48 @@ def contain(
     container_name,
     netns_namespace,
     command,
-    exec=False,
 ):
-    tools.setns(netns_namespace)
-    _setup_cpu_cgroup(container_id, cpu_shares)
-    _setup_memory_cgroup(container_id, memory, memory_swap)
-    tools.sethostname(container_name)
-    subprocess.run(["mount", "--make-rprivate", "/"], check=True)
-    new_root = create_container_root(
-        image_name, image_dir, container_id, container_name, container_dir
-    )
+    global new_root
+    try:
+        tools.setns(netns_namespace)
+        _setup_cpu_cgroup(container_id, cpu_shares)
+        _setup_memory_cgroup(container_id, memory, memory_swap)
+        tools.sethostname(container_name)
+        subprocess.run(["mount", "--make-rprivate", "/"], check=True)
+        new_root = create_container_root(
+            image_name, image_dir, container_id, container_name, container_dir
+        )
 
-    _create_mount(new_root)
-    old_root = os.path.join(new_root, "old_root")
-    os.makedirs(old_root)
+        _create_mount(new_root)
+        old_root = os.path.join(new_root, "old_root")
+        os.makedirs(old_root)
 
-    tools.pivot_root(new_root, old_root)
+        tools.pivot_root(new_root, old_root)
 
-    os.chdir("/")
+        os.chdir("/")
 
-    tools.umount("/old_root", 2)
-    os.rmdir("/old_root")
+        tools.umount("/old_root", 2)
+        os.rmdir("/old_root")
 
-    if user:
-        if ":" in user:
-            uid, gid = user.split(":")
-            uid = int(uid)
-            gid = int(gid)
-        else:
-            uid = int(user)
-            gid = uid
+        if user:
+            if ":" in user:
+                uid, gid = user.split(":")
+                uid = int(uid)
+                gid = int(gid)
+            else:
+                uid = int(user)
+                gid = uid
 
-        os.setgid(gid)
-        os.setuid(uid)
+            os.setgid(gid)
+            os.setuid(uid)
 
-    with open("/etc/resolv.conf", "w") as f:
-        f.write("nameserver 8.8.8.8")
+        with open("/etc/resolv.conf", "w") as f:
+            f.write("nameserver 8.8.8.8")
 
-    send_status()
-    os._exit(0)
+        os.execvp(command[0], command)
+    except Exception as e:
+        _unmount(new_root)
+        print(e)
 
 
 def delete_container(name, container_dir):
@@ -337,7 +358,6 @@ def run(
     image_dir,
     container_dir,
     command,
-    exec=False,
 ):
     container_id = str(uuid.uuid4())
     flag, _, _ = check_container(container_dir, f"{name}_{container_id}")
@@ -377,43 +397,42 @@ def run(
             name,
             netns_namespace,
             command,
-            exec,
         )
 
 
-def execute_container(image_name, image_dir, container_name, container_dir, command):
-    image_path = os.path.join(image_dir, f"{image_name}.tar")
-    flag, name, id = check_container(container_dir, container_name)
-
-    if not flag:
-        print("Container not exisits")
-        return
-
-    container_path = os.path.join(container_dir, f"{name}_{id}")
-    image_root = os.path.join(container_dir, container_path, "rootfs")
-
-    if not os.path.exists(image_path):
-        raise FileNotFoundError(f"Unable to locate image {image_name}")
-
-    if not os.path.exists(image_root):
-        os.makedirs(image_root)
-
-    with tarfile.open(image_path) as t:
-        members = [
-            m
-            for m in t.getmembers()
-            if m.type not in (tarfile.CHRTYPE, tarfile.BLKTYPE)
-        ]
-        t.extractall(image_root, members=members)
-
-    _create_mount(image_root)
-
-    old_root = os.path.join(image_root, "old_root")
-    os.makedirs(old_root, exist_ok=True)
-    tools.pivot_root(image_root, old_root)
-    os.chdir("/")
-
-    tools.umount("/old_root", 2)
-    os.rmdir("/old_root")
-
-    os.execvp(command[0], command)
+# def execute_container(image_name, image_dir, container_name, container_dir, command):
+#    image_path = os.path.join(image_dir, f"{image_name}.tar")
+#    flag, name, id = check_container(container_dir, container_name)
+#
+#    if not flag:
+#        print("Container not exisits")
+#        return
+#
+#    container_path = os.path.join(container_dir, f"{name}_{id}")
+#    image_root = os.path.join(container_dir, container_path, "rootfs")
+#
+#    if not os.path.exists(image_path):
+#        raise FileNotFoundError(f"Unable to locate image {image_name}")
+#
+#    if not os.path.exists(image_root):
+#        os.makedirs(image_root)
+#
+#    with tarfile.open(image_path) as t:
+#        members = [
+#            m
+#            for m in t.getmembers()
+#            if m.type not in (tarfile.CHRTYPE, tarfile.BLKTYPE)
+#        ]
+#        t.extractall(image_root, members=members)
+#
+#    _create_mount(image_root)
+#
+#    old_root = os.path.join(image_root, "old_root")
+#    os.makedirs(old_root, exist_ok=True)
+#    tools.pivot_root(image_root, old_root)
+#    os.chdir("/")
+#
+#    tools.umount("/old_root", 2)
+#    os.rmdir("/old_root")
+#
+#    os.execvp(command[0], command)
