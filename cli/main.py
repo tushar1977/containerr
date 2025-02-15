@@ -205,7 +205,6 @@ def _create_mount(new_root):
         tools.mount("tmpfs", dev_path, "tmpfs", "mode=755,nosuid,strictatime")
 
         dev_pts = os.path.join(new_root, "dev", "pts")
-
         if not os.path.exists(dev_pts):
             os.makedirs(dev_pts)
             tools.mount("devpts", dev_pts, "devpts", "gid=5,mode=620")

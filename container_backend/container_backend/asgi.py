@@ -16,4 +16,4 @@ django_app = get_asgi_application()
 
 from container.views_terminal import sio
 
-application = socketio.ASGIApp(sio, django_app, socketio_path="/socket.io/")
+application = socketio.ASGIApp(sio, django_app)

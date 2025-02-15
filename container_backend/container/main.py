@@ -1,11 +1,8 @@
 import os
 import fnmatch
+import pty
 import shutil
-import re
 import socket
-from pyroute2 import common, netns, NetNS, IPDB
-from pyroute2.ndb.objects import json
-from pyroute2.netlink.exceptions import time
 from .networking import (
     configure_iptables,
     container_network,
@@ -20,15 +17,13 @@ from .networking import (
     get_bridge_ip,
     move_veth,
 )
-import random
 import stat
 import subprocess
 import tarfile
 import uuid
 import sys
-import click
 from .functions import FuncTools
-from .constants import CLONE_NEWNS, CLONE_NEWPID, CLONE_NEWUTS, CLONE_NEWNET
+from .constants import CLONE_NEWNS, CLONE_NEWPID, CLONE_NEWUTS
 
 tools = FuncTools()
 SOCKET_ADD = "/tmp/mysock.socket"
@@ -318,6 +313,10 @@ def contain(
         with open("/etc/resolv.conf", "w") as f:
             f.write("nameserver 8.8.8.8")
 
+        master, slave = pty.openpty()
+        os.dup2(slave, 0)  # Set stdin
+        os.dup2(slave, 1)  # Set stdout
+        os.dup2(slave, 2)  # Set stderr
         os.execvp(command[0], command)
     except Exception as e:
         _unmount(new_root)
