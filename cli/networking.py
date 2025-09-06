@@ -1,8 +1,7 @@
 import random
 import iptc
 import string
-from pyroute2 import IPDB, IPRoute, netns
-from pyroute2.nslink.nslink import NetNS
+from pyroute2 import IPDB, IPRoute, NetNS, netns
 
 
 def generate_random_name(prefix, length=3):
@@ -198,25 +197,25 @@ def move_veth(netns_name, veth_container):
 
 
 def container_network(netns_name, container_ip, veth_container, bridge_ip):
-    ipr = IPRoute()
     try:
-        with IPDB(nl=NetNS(netns_name)) as ns:
-            with ns.interfaces.lo as lo:
-                lo.up()
+        with NetNS(netns_name) as ns:
+            ns.link("set", index=ns.link_lookup(ifname="lo")[0], state="up")
 
-            if veth_container not in ns.interfaces:
+            idx = ns.link_lookup(ifname=veth_container)
+            if not idx:
                 raise ValueError(
-                    f"Interface {veth_container} does not exist in namespace {netns_name}."
+                    f"Interface {veth_container} not found in {netns_name}"
                 )
+            idx = idx[0]
 
-            with ns.interfaces[veth_container] as veth_container_if:
-                veth_container_if.add_ip(container_ip)
-                veth_container_if.up()
+            ip, prefix = container_ip.split("/")
+            ns.addr("add", index=idx, address=ip, mask=int(prefix))
+            ns.link("set", index=idx, state="up")
 
-            ns.routes.add({"dst": "default", "gateway": bridge_ip}).commit()
+            ns.route("add", dst="default", gateway=bridge_ip.split("/")[0], oif=idx)
 
-        print(f"Configured network for {veth_container} in namespace {netns_name}.")
+        print(
+            f"Configured {veth_container} in {netns_name} with IP {container_ip}, gateway {bridge_ip}"
+        )
     except Exception as e:
         print(f"Error configuring network in namespace {netns_name}: {e}")
-    finally:
-        ipr.close()

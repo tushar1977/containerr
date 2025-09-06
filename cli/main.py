@@ -1,6 +1,4 @@
 import os
-from pyroute2 import netns, NetNS, IPDB
-from pyroute2.ndb.objects import json
 from networking import (
     configure_iptables,
     container_network,
@@ -30,7 +28,7 @@ tools = FuncTools()
 subnet = "192.168.3.0/24"
 
 bridge_name = "custom_bridge"
-veth_host = generate_random_name("veth")
+veth_host = generate_random_name("eth")
 container_ip = generate_random_ip(subnet)
 gateway_ip = generate_gateway_ip(subnet)
 bridge_ip = get_bridge_ip(bridge_name)
@@ -66,7 +64,7 @@ def makedev(dev_path):
         )
 
 
-def _get_image_path(image_name, image_dir, image_suffix="tar"):
+def _get_image_path(image_name, image_dir, image_suffix="tar.gz"):
     return os.path.join(image_dir, os.extsep.join([image_name, image_suffix]))
 
 
@@ -136,6 +134,7 @@ def create_container_root(
     image_name, image_dir, container_id, container_name, container_dir
 ):
     image_path = _get_image_path(image_name, image_dir)
+    print(image_path)
     image_root = os.path.join(image_dir, image_name, "rootfs")
 
     if not os.path.exists(image_path):
@@ -338,7 +337,6 @@ def run(
     move_veth(netns_namespace, veth_container)
 
     container_network(netns_namespace, container_ip, veth_container, bridge_ip)
-
     flags = CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWUTS
     tools.unshare(flags)
 
