@@ -19,6 +19,8 @@ class FuncTools:
     def pivot_root(self, new_root, put_old):
         new_root = new_root.encode("utf-8")
         put_old = put_old.encode("utf-8")
+        print(new_root)
+        print(put_old)
         result = libc.syscall(NR_pivot_root, new_root, put_old)
         if result != 0:
             print(f"pivot_root failed with error code {result}", file=sys.stderr)

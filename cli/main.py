@@ -1,4 +1,5 @@
 import os
+import re
 from networking import (
     configure_iptables,
     container_network,
@@ -142,14 +143,13 @@ def create_container_root(
 
     if not os.path.exists(image_root):
         os.makedirs(image_root)
-
-    with tarfile.open(image_path) as t:
-        members = [
-            m
-            for m in t.getmembers()
-            if m.type not in (tarfile.CHRTYPE, tarfile.BLKTYPE)
-        ]
-        t.extractall(image_root, members=members)
+        with tarfile.open(image_path) as t:
+            members = [
+                m
+                for m in t.getmembers()
+                if m.type not in (tarfile.CHRTYPE, tarfile.BLKTYPE)
+            ]
+            t.extractall(image_root, members=members)
 
     container_cow_rw = _get_container_path(
         f"{container_name}_{container_id}", container_dir, "cow_rs"
@@ -223,6 +223,56 @@ def _create_mount(new_root):
         raise
 
 
+def mount_fs(container_name, command):
+    rootdir = f"{os.getcwd()}/containers"
+    container_final = None
+    pattern = re.compile(rf"^{re.escape(container_name)}_[a-f0-9-]+$")
+    for entry in os.listdir(rootdir):
+        if pattern.match(entry):
+            container_final = os.path.join(rootdir, entry)
+            break
+    if not container_final:
+        raise RuntimeError(f"No matching container found for {container_name}")
+
+    container_id = container_final.split("_")
+
+    netns_namespace = f"netns_{container_id[-1]}"
+
+    lowerdir = f"{os.getcwd()}/images/ubuntu/rootfs"
+    upperdir = os.path.join(container_final, "cow_rs")
+    workdir = os.path.join(container_final, "cow_workdir")
+    target = os.path.join(container_final, "rootfs")
+
+    os.makedirs(upperdir, exist_ok=True)
+    os.makedirs(workdir, exist_ok=True)
+    os.makedirs(target, exist_ok=True)
+
+    if not os.path.ismount(target):
+        options = f"lowerdir={lowerdir},upperdir={upperdir},workdir={workdir}"
+        tools.mount("overlay", target, "overlay", options)
+
+    else:
+        print(f"{target} already mounted, skipping overlay setup.")
+
+    tools.setns(netns_namespace)
+    tools.sethostname(container_name)
+    subprocess.run(["mount", "--make-rprivate", "/"], check=True)
+    new_root = target
+    old_root = os.path.join(new_root, "old_root")
+    os.makedirs(old_root, exist_ok=True)
+
+    _create_mount(new_root)
+    tools.pivot_root(new_root, old_root)
+    os.chdir("/")
+
+    tools.umount("/old_root", 2)
+    os.rmdir("/old_root")
+
+    with open("/etc/resolv.conf", "w") as f:
+        f.write("nameserver 8.8.8.8")
+    os.execvp(command[0], command)
+
+
 def contain(
     command,
     image_name,
@@ -238,7 +288,6 @@ def contain(
     container_exist=False,
 ):
     if not container_exist:
-        print(container_name)
         tools.setns(netns_namespace)
         _setup_cpu_cgroup(container_id, cpu_shares)
         _setup_memory_cgroup(container_id, memory, memory_swap)
@@ -260,6 +309,8 @@ def contain(
         tools.umount("/old_root", 2)
         os.rmdir("/old_root")
 
+        with open("/etc/resolv.conf", "w") as f:
+            f.write("nameserver 8.8.8.8")
         if user:
             if ":" in user:
                 uid, gid = user.split(":")
@@ -272,11 +323,10 @@ def contain(
             os.setgid(gid)
             os.setuid(uid)
 
-        with open("/etc/resolv.conf", "w") as f:
-            f.write("nameserver 8.8.8.8")
         os.execvp(command[0], command)
 
 
+# creating
 @cli.command(
     context_settings=dict(
         ignore_unknown_options=True,
@@ -286,7 +336,7 @@ def contain(
     "--name",
     "-n",
     help="Gives name to containers",
-    default=lambda: f"container{random.randint(1, 100)}",
+    default=lambda: f"container{random.randint(1, 1000)}",
 )
 @click.option(
     "--memory",
@@ -325,6 +375,7 @@ def run(
 ):
     container_id = str(uuid.uuid4())
 
+    print(name)
     veth_container = f"veth{container_id[0:5]}"
     create_bridge(bridge_name, bridge_ip)
     create_veth_pair(veth_host, veth_container, bridge_name)
@@ -365,81 +416,28 @@ def run(
     print(f"Child process {pid} exited with status {exit_code}")
 
 
-def check_container(container_dir, container_name):
-    for dir_name in os.listdir(container_dir):
-        if dir_name.startswith(f"{container_name}_"):
-            parts = dir_name.split("_", 1)
-            return True, parts[0], parts[1]
-
-    return False, None, None
-
-
+# mounting
 @cli.command(
     context_settings=dict(
         ignore_unknown_options=True,
     )
 )
-@click.option("--image-name", "-i", help="Image name", default="ubuntu")
-@click.option(
-    "--image-dir", help="Images directory", default=os.path.join(dir, "images/")
-)
-@click.option(
-    "--name",
-    "-n",
-    help="Gives name to containers",
-)
-@click.option(
-    "--container-dir",
-    help="Containers directory",
-    default=os.path.join(dir, "containers/"),
-)
+@click.option("--container-name", "-n", required=True, help="Container name")
 @click.argument("command", required=True, nargs=-1)
-def exec(image_name, image_dir, name, container_dir, command):
-    print(name)
-    image_path = os.path.join(image_dir, f"{image_name}.tar")
-    flag, name, id = check_container(container_dir, name)
-    print(f"{name}_{id}")
-    if not flag:
-        print("Container not exisits")
-        return
+def mount(container_name, command):
+    flags = CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWUTS
+    tools.unshare(flags)
 
-    container_path = os.path.join(container_dir, f"{name}_{id}")
-    image_root = os.path.join(container_dir, container_path, "rootfs")
+    pid = os.fork()
+    if pid > 0:
+        print(pid)
+    if pid == 0:
+        mount_fs(container_name, command)
+        os._exit(0)
 
-    if not os.path.exists(image_path):
-        raise FileNotFoundError(f"Unable to locate image {image_name}")
-
-    if not os.path.exists(image_root):
-        os.makedirs(image_root)
-    try:
-        with tarfile.open(image_path) as t:
-            members = [
-                m
-                for m in t.getmembers()
-                if m.type not in (tarfile.CHRTYPE, tarfile.BLKTYPE)
-            ]
-            t.extractall(image_root, members=members)
-
-            flags = CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWUTS
-            tools.unshare(flags)
-
-            pid = os.fork()
-            if pid > 0:
-                print(pid)
-            if pid == 0:
-                _create_mount(image_root)
-
-                old_root = os.path.join(image_root, "old_root")
-                if not os.path.exists(old_root):
-                    os.makedirs(old_root, exist_ok=True)
-                print(image_root)
-
-                os.chroot(image_root)
-                os.chdir("/")
-                os.execvp(command[0], command)
-    except Exception as e:
-        _unmount(image_root)
-        print(e)
+    _, status = os.waitpid(pid, 0)
+    exit_code = os.WEXITSTATUS(status)
+    print(f"Child process {pid} exited with status {exit_code}")
 
 
 if __name__ == "__main__":

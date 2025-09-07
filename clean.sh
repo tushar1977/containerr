@@ -79,6 +79,7 @@ cleanup() {
 
 # Run cleanup
 cleanup
-
+find "$HOME/containerr/cli/containers" -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} +
+echo "All subfolders in ~/containerr/cli/containers have been deleted."
 # Return to the original directory
 popd || exit

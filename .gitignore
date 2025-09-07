@@ -1,5 +1,6 @@
 __pycache__/
 /containers/*
+/containers
 images/*
 .venv
 container_backend/container/containers/*
